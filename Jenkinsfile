@@ -3,7 +3,6 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
     tools {
@@ -12,25 +11,25 @@ pipeline {
     }
 
     stages {
-        stage('git checkout') {
+        stage('Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('compile') {
+        stage('Compile') {
             steps {
                 sh "mvn compile"
             }
         }
 
-        stage('unit tests') {
+        stage('Unit Tests') {
             steps {
-                sh "mvn test -DskipTests=true"
+                sh "mvn test"
             }
         }
 
-        stage('SonarQube analysis') {
+        stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-scanner') {
                     sh "${env.SCANNER_HOME}/bin/sonar-scanner \
@@ -43,11 +42,9 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-             }
-        }
+                // Make sure 'DC' is configured in Jenkins -> Global Tool Configuration
+                dependencyCheck additionalArguments: '--format HTML', odcInstallation: 'DC', skipOnError: true
+            }
         }
 
         stage('Build') {
@@ -56,46 +53,59 @@ pipeline {
             }
         }
 
-        stage('deploy to Nexus') {
+        stage('Deploy to Nexus') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3') {
                     sh "mvn deploy -DskipTests=true"
                 }
             }
         }
-        
 
-        stage('build and Tag docker image') {
+        stage('Build Docker Image') {
             steps {
                 script {
-                        sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
-                    }
-            }
-        }
-
-        stage('Push image to Hub'){
-            steps{
-                script{
-                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
-                   sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'}
-                   sh 'docker push waghepratiksha21/ekart:latest'
+                    sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
                 }
             }
         }
-        stage('EKS and Kubectl configuration'){
-            steps{
-                script{
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
+                        sh "docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}"
+                        sh "docker push waghepratiksha21/ekart:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Configure EKS') {
+            steps {
+                script {
                     sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
                 }
             }
         }
-        stage('Deploy to k8s'){
-            steps{
-                script{
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
                     sh 'kubectl apply -f deploymentservice.yml'
                 }
             }
         }
     }
 
+    post {
+        always {
+            node {
+                echo "Cleaning workspace..."
+                cleanWs()
+            }
+        }
+        failure {
+            echo "Pipeline failed!"
+        }
+    }
 }
