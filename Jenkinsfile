@@ -1,12 +1,12 @@
 pipeline {
-    agent any  // Runs on any available Jenkins agent
+    agent any  // Runs on any available Jenkins node
 
     environment {
-        // Replace these tool names with what you have installed in Jenkins
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'
+        // Make sure these match exactly with Jenkins Tool Configuration names
+        JAVA_HOME = tool name: 'JDK 21', type: 'jdk' 
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
-        DOCKER_CREDENTIALS = 'docker-hub-creds' // Jenkins credential ID for Docker login
+        DOCKER_CREDENTIALS = 'docker-hub-creds'
         DOCKER_IMAGE = 'your-dockerhub-username/ekart:latest'
     }
 
@@ -27,7 +27,6 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                // Make sure you have a Dependency-Check installation configured in Jenkins
                 dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
             }
         }
@@ -46,14 +45,16 @@ pipeline {
 
     post {
         success {
-            echo 'Pipeline completed successfully!'
+            node {   // Must be wrapped in node to clean workspace
+                echo 'Pipeline completed successfully!'
+                cleanWs()
+            }
         }
         failure {
-            echo 'Pipeline failed!'
-        }
-        always {
-            // Clean workspace without wrapping in node
-            cleanWs()
+            node {   // Must be wrapped in node to clean workspace
+                echo 'Pipeline failed!'
+                cleanWs()
+            }
         }
     }
 }
