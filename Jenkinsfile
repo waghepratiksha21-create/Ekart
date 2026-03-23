@@ -49,10 +49,8 @@ pipeline {
 
     post {
         always {
-            node {
-                echo 'Cleaning workspace...'
-                cleanWs()  // Now safely runs on a node
-            }
+            echo 'Cleaning workspace...'
+            cleanWs()  // No node needed; runs on the agent defined at top
         }
 
         success {
