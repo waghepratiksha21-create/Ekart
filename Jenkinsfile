@@ -1,11 +1,11 @@
 pipeline {
-    agent any
+    agent any  // Provides a node context automatically
 
     environment {
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'  // Must match Jenkins Global Tool name
+        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'  // Must match your Jenkins JDK
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
-        DOCKER_CREDENTIALS = 'docker-hub-creds'      // Set in Jenkins credentials
+        DOCKER_CREDENTIALS = 'docker-hub-creds'      // Your Docker Hub credentials ID
         DOCKER_IMAGE = 'your-dockerhub-username/ekart:latest'
     }
 
@@ -18,41 +18,33 @@ pipeline {
 
         stage('Checkout SCM') {
             steps {
-                node {  // Ensures workspace context
-                    checkout([$class: 'GitSCM',
-                        branches: [[name: '*/master']],
-                        userRemoteConfigs: [[url: 'https://github.com/waghepratiksha21-create/Ekart.git']]
-                    ])
-                }
+                checkout([$class: 'GitSCM',
+                    branches: [[name: '*/master']],
+                    userRemoteConfigs: [[url: 'https://github.com/waghepratiksha21-create/Ekart.git']]
+                ])
             }
         }
 
         stage('Build & Test') {
             steps {
-                node {
-                    withMaven(maven: 'Maven 3.9.3') {
-                        sh 'mvn clean verify'
-                    }
+                withMaven(maven: 'Maven 3.9.3') {
+                    sh 'mvn clean verify'
                 }
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                node {
-                    dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
-                }
+                dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
             }
         }
 
         stage('Docker Build & Push') {
             steps {
-                node {
-                    script {
-                        docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
-                            def appImage = docker.build(DOCKER_IMAGE)
-                            appImage.push()
-                        }
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
+                        def appImage = docker.build(DOCKER_IMAGE)
+                        appImage.push()
                     }
                 }
             }
@@ -62,11 +54,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning workspace...'
-            script {
-                node {  // Node required for cleanWs
-                    cleanWs()
-                }
-            }
+            cleanWs() // No node block needed
         }
 
         success {
@@ -78,3 +66,4 @@ pipeline {
         }
     }
 }
+  
