@@ -40,16 +40,20 @@ pipeline {
         }
 
         stage('OWASP Dependency Check') {
-            steps {
-                // Using secret credentials securely
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck(
-                        odcInstallation: 'DC',
-                        nvdApiKey: NVD_API_KEY
-                    )
-                }
-            }
+    steps {
+        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+            sh """
+                dependency-check.sh \
+                --project "EKART" \
+                --scan . \
+                --enableExperimental \
+                --nvdApiKey $NVD_API_KEY \
+                --format HTML \
+                --out dependency-check-report.html
+            """
         }
+    }
+}
 
         stage('Build') {
             steps {
