@@ -1,8 +1,8 @@
 pipeline {
-    agent any  // Ensures every stage runs on a node with a workspace
+    agent any  // Ensure all stages and post actions run on a node
 
     environment {
-        // Replace these names with the exact names from Jenkins Global Tool Configuration
+        // Replace these names with your Jenkins Global Tool Config
         JAVA_HOME = tool name: 'JDK 21', type: 'jdk'
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
@@ -19,7 +19,6 @@ pipeline {
 
         stage('Checkout SCM') {
             steps {
-                // Checkout source code inside a proper node
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
@@ -34,7 +33,6 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                // Must be installed and configured in Jenkins
                 dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
             }
         }
@@ -53,10 +51,8 @@ pipeline {
 
     post {
         always {
-            node {   // Wrap cleanWs inside a node block
-                echo 'Cleaning workspace...'
-                cleanWs()
-            }
+            echo 'Cleaning workspace...'
+            cleanWs()  // No node {} here; agent any already provides workspace context
         }
 
         success {
