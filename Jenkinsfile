@@ -2,17 +2,16 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'               // Sonar Scanner tool name in Jenkins
-        NVD_API_KEY = credentials('nvd-api-key')         // Secret text for OWASP Dependency Check
+        SCANNER_HOME = tool 'sonar-scanner'             // SonarQube scanner installation name
+        NVD_API_KEY = credentials('nvd-api-key')       // Secret text for OWASP Dependency Check
     }
 
     tools {
-        maven 'maven3'   // Maven installation name in Jenkins
-        jdk 'jdk17'      // JDK installation name in Jenkins
+        maven 'maven3'   // Must match Maven installation in Jenkins Global Tool Configuration
+        jdk 'jdk17'      // Must match JDK installation name in Jenkins
     }
 
     stages {
-
         stage('Git Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
@@ -33,27 +32,24 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-server') {   // Name of SonarQube installation in Jenkins
-                    sh """
-                        ${env.SCANNER_HOME}/bin/sonar-scanner \
+                // Must match the SonarQube server name in Jenkins Global Configuration
+                withSonarQubeEnv('sonar-server') {
+                    sh """${env.SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
                         -Dsonar.projectName=EKART \
-                        -Dsonar.java.binaries=target/classes
-                    """
+                        -Dsonar.java.binaries=target/classes"""
                 }
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-                }
+                dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                odcInstallation: 'DC'
             }
         }
 
-        stage('Build') {
+        stage('Package') {
             steps {
                 sh 'mvn package -DskipTests=true'
             }
@@ -61,10 +57,11 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                // Username/Password credentials required
-                withCredentials([usernamePassword(credentialsId: 'nexus-creds', 
-                                                  usernameVariable: 'NEXUS_USER', 
-                                                  passwordVariable: 'NEXUS_PASSWORD')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-creds', 
+                    usernameVariable: 'NEXUS_USER', 
+                    passwordVariable: 'NEXUS_PASSWORD'
+                )]) {
                     sh """
                         mvn deploy \
                         -DskipTests=true \
@@ -76,22 +73,26 @@ pipeline {
             }
         }
 
-        stage('Build and Tag Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 sh 'docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile .'
             }
         }
 
-        stage('Push Docker Image to Hub') {
+        stage('Push Docker Image') {
             steps {
-                withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKERHUB_PASSWORD')]) {
-                    sh 'docker login -u waghepratiksha21 -p ${DOCKERHUB_PASSWORD}'
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-pwd', 
+                    usernameVariable: 'DOCKER_USER', 
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
                     sh 'docker push waghepratiksha21/ekart:latest'
                 }
             }
         }
 
-        stage('EKS and Kubectl Configuration') {
+        stage('EKS Configuration') {
             steps {
                 sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
             }
@@ -102,19 +103,17 @@ pipeline {
                 sh 'kubectl apply -f deploymentservice.yml'
             }
         }
-
-    } // stages
+    }
 
     post {
         always {
-            echo 'Pipeline finished'
+            echo 'Pipeline finished!'
         }
         success {
-            echo 'Pipeline completed successfully!'
+            echo 'Pipeline succeeded!'
         }
         failure {
-            echo 'Pipeline failed. Check logs for details.'
+            echo 'Pipeline failed!'
         }
     }
-
 }
