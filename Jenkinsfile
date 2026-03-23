@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'   // Make sure JDK 21 exists in Jenkins
+        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'   // Ensure this JDK exists in Jenkins
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
         DOCKER_REGISTRY = 'your-docker-registry-url'  // replace with your registry
@@ -28,8 +28,9 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                dependencyCheck additionalArguments: '--format HTML',
-                                stopBuild: true
+                dependencyCheck odcInstallation: 'ODC', // exact name from Global Tool Config
+                                stopBuild: true,
+                                additionalArguments: '--format HTML'
             }
         }
 
