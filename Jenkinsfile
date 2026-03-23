@@ -2,15 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Update JDK to match your Jenkins Global Tool Configuration
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'
+        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'   // Make sure JDK 21 exists in Jenkins
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
-        DOCKER_REGISTRY = 'your-docker-registry-url' // replace with your registry
+        DOCKER_REGISTRY = 'your-docker-registry-url'  // replace with your registry
         DOCKER_IMAGE = 'ekart-app'
         DOCKER_TAG = 'latest'
-        NEXUS_REPO = 'docker-hosted' // replace with your Nexus repo
-        DEPENDENCY_CHECK_FAIL_BUILD_ONCVSS = '7'
+        NEXUS_REPO = 'docker-hosted'  // replace with your Nexus repo
     }
 
     stages {
@@ -31,7 +29,7 @@ pipeline {
         stage('OWASP Dependency Check') {
             steps {
                 dependencyCheck additionalArguments: '--format HTML',
-                                failBuildOnCVSS: env.DEPENDENCY_CHECK_FAIL_BUILD_ONCVSS
+                                stopBuild: true
             }
         }
 
