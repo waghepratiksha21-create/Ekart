@@ -7,7 +7,7 @@ pipeline {
 
     tools {
         maven 'maven3'
-        jdk 'jdk-17'
+        jdk 'jdk21' // Must match installed JDK in Jenkins
     }
 
     stages {
@@ -42,8 +42,9 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                // Make sure 'DC' is configured in Jenkins -> Global Tool Configuration
-                dependencyCheck additionalArguments: '--format HTML', odcInstallation: 'DC', skipOnError: true
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    dependencyCheck additionalArguments: '--format HTML', odcInstallation: 'DC'
+                }
             }
         }
 
@@ -55,7 +56,7 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3') {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk21', maven: 'maven3') {
                     sh "mvn deploy -DskipTests=true"
                 }
             }
@@ -82,27 +83,21 @@ pipeline {
 
         stage('Configure EKS') {
             steps {
-                script {
-                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-                }
+                sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    sh 'kubectl apply -f deploymentservice.yml'
-                }
+                sh 'kubectl apply -f deploymentservice.yml'
             }
         }
     }
 
     post {
         always {
-            node {
-                echo "Cleaning workspace..."
-                cleanWs()
-            }
+            echo "Cleaning workspace..."
+            cleanWs()
         }
         failure {
             echo "Pipeline failed!"
