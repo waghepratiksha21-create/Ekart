@@ -2,13 +2,9 @@ pipeline {
     agent any
 
     environment {
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'   // Ensure this JDK exists in Jenkins
+        JAVA_HOME = tool name: 'JDK 17', type: 'jdk'   // Replace with your actual JDK name
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
-        DOCKER_REGISTRY = 'your-docker-registry-url'  // replace with your registry
-        DOCKER_IMAGE = 'ekart-app'
-        DOCKER_TAG = 'latest'
-        NEXUS_REPO = 'docker-hosted'  // replace with your Nexus repo
     }
 
     stages {
@@ -18,7 +14,7 @@ pipeline {
             }
         }
 
-        stage('Build & Test with Maven') {
+        stage('Build & Test') {
             steps {
                 withMaven(maven: 'Maven 3.9.3') {
                     sh 'mvn clean verify'
@@ -28,21 +24,7 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                dependencyCheck odcInstallation: 'ODC', // exact name from Global Tool Config
-                                stopBuild: true,
-                                additionalArguments: '--format HTML'
-            }
-        }
-
-        stage('Docker Build & Push') {
-            steps {
-                script {
-                    sh """
-                        docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} .
-                        echo $DOCKER_PASSWORD | docker login ${DOCKER_REGISTRY} --username $DOCKER_USERNAME --password-stdin
-                        docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                    """
-                }
+                dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
             }
         }
     }
@@ -55,7 +37,9 @@ pipeline {
             echo 'Pipeline failed!'
         }
         always {
-            cleanWs()
+            node {
+                cleanWs()
+            }
         }
     }
 }
