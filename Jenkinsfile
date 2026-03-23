@@ -1,8 +1,7 @@
 pipeline {
-    agent any  // Ensure all stages and post actions run on a node
+    agent any
 
     environment {
-        // Replace these names with your Jenkins Global Tool Config
         JAVA_HOME = tool name: 'JDK 21', type: 'jdk'
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
@@ -16,7 +15,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
@@ -51,8 +49,10 @@ pipeline {
 
     post {
         always {
-            echo 'Cleaning workspace...'
-            cleanWs()  // No node {} here; agent any already provides workspace context
+            node {
+                echo 'Cleaning workspace...'
+                cleanWs()  // Now safely runs on a node
+            }
         }
 
         success {
