@@ -2,7 +2,6 @@ pipeline {
     agent any  // Runs on any available Jenkins node
 
     environment {
-        // Make sure these match exactly with Jenkins Tool Configuration names
         JAVA_HOME = tool name: 'JDK 21', type: 'jdk' 
         PATH = "${JAVA_HOME}/bin:${env.PATH}"
         MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
@@ -45,16 +44,12 @@ pipeline {
 
     post {
         success {
-            node {   // Must be wrapped in node to clean workspace
-                echo 'Pipeline completed successfully!'
-                cleanWs()
-            }
+            echo 'Pipeline completed successfully!'
+            cleanWs()  // No node {} needed
         }
         failure {
-            node {   // Must be wrapped in node to clean workspace
-                echo 'Pipeline failed!'
-                cleanWs()
-            }
+            echo 'Pipeline failed!'
+            cleanWs()  // No node {} needed
         }
     }
 }
