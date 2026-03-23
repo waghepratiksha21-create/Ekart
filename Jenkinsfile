@@ -56,13 +56,21 @@ pipeline {
             }
         }
 
-        stage('deploy to Nexus') {
-            steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                     sh "mvn deploy -s /var/lib/jenkins/.m2/settings.xml -DskipTests=true"
-                }
-            }
+      stage('deploy to Nexus') {
+        steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-creds', 
+                                          usernameVariable: 'NEXUS_USER', 
+                                          passwordVariable: 'NEXUS_PASSWORD')]) {
+            sh """
+                mvn deploy \
+                -DskipTests=true \
+                -DaltDeploymentRepository=maven-snapshots::default::http://65.2.152.55:8081/repository/maven-snapshots/ \
+                -Dnexus.username=$NEXUS_USER \
+                -Dnexus.password=$NEXUS_PASSWORD
+            """
         }
+    }
+}
         
 
         stage('build and Tag docker image') {
