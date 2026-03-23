@@ -59,7 +59,7 @@ pipeline {
         stage('deploy to Nexus') {
             steps {
                 withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                    sh "mvn deploy -DskipTests=true"
+                     sh "mvn deploy -s /var/lib/jenkins/.m2/settings.xml -DskipTests=true"
                 }
             }
         }
