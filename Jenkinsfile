@@ -2,16 +2,17 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'             // SonarQube scanner installation name
-        NVD_API_KEY = credentials('nvd-api-key')       // Secret text for OWASP Dependency Check
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text
     }
 
     tools {
-        maven 'maven3'   // Must match Maven installation in Jenkins Global Tool Configuration
-        jdk 'jdk17'      // Must match JDK installation name in Jenkins
+        maven 'maven3'
+        jdk 'jdk17'
     }
 
     stages {
+
         stage('Git Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
@@ -20,19 +21,18 @@ pipeline {
 
         stage('Compile') {
             steps {
-                sh 'mvn compile'
+                sh "mvn compile"
             }
         }
 
         stage('Unit Tests') {
             steps {
-                sh 'mvn test -DskipTests=true'
+                sh "mvn test -DskipTests=true"
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                // Must match the SonarQube server name in Jenkins Global Configuration
                 withSonarQubeEnv('sonar-server') {
                     sh """${env.SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
@@ -44,49 +44,46 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                odcInstallation: 'DC'
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+                }
             }
         }
 
-        stage('Package') {
+        stage('Build') {
             steps {
-                sh 'mvn package -DskipTests=true'
+                sh "mvn package -DskipTests=true"
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'nexus-creds', 
-                    usernameVariable: 'NEXUS_USER', 
-                    passwordVariable: 'NEXUS_PASSWORD'
-                )]) {
+                // Use username/password credentials (StandardUsernamePasswordCredentials)
+                withCredentials([usernamePassword(credentialsId: 'nexus-creds',
+                                                 usernameVariable: 'NEXUS_USER',
+                                                 passwordVariable: 'NEXUS_PASSWORD')]) {
                     sh """
                         mvn deploy \
                         -DskipTests=true \
                         -DaltDeploymentRepository=maven-snapshots::default::http://65.2.152.55:8081/repository/maven-snapshots/ \
-                        -Dnexus.username=$NEXUS_USER \
-                        -Dnexus.password=$NEXUS_PASSWORD
+                        -Dnexus.username="\$NEXUS_USER" \
+                        -Dnexus.password="\$NEXUS_PASSWORD"
                     """
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build and Tag Docker Image') {
             steps {
-                sh 'docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile .'
+                sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-pwd', 
-                    usernameVariable: 'DOCKER_USER', 
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
+                withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKERHUB_PWD')]) {
+                    sh 'docker login -u waghepratiksha21 -p "${DOCKERHUB_PWD}"'
                     sh 'docker push waghepratiksha21/ekart:latest'
                 }
             }
@@ -106,11 +103,8 @@ pipeline {
     }
 
     post {
-        always {
-            echo 'Pipeline finished!'
-        }
         success {
-            echo 'Pipeline succeeded!'
+            echo 'Pipeline completed successfully!'
         }
         failure {
             echo 'Pipeline failed!'
