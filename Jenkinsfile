@@ -1,69 +1,101 @@
-pipeline {
-    agent any  // Provides a node context automatically
+ipeline {
+    agent any
 
     environment {
-        JAVA_HOME = tool name: 'JDK 21', type: 'jdk'  // Must match your Jenkins JDK
-        PATH = "${JAVA_HOME}/bin:${env.PATH}"
-        MAVEN_HOME = tool name: 'Maven 3.9.3', type: 'maven'
-        DOCKER_CREDENTIALS = 'docker-hub-creds'      // Your Docker Hub credentials ID
-        DOCKER_IMAGE = 'your-dockerhub-username/ekart:latest'
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
-    options {
-        timeout(time: 60, unit: 'MINUTES')
-        skipDefaultCheckout(true)
+    tools {
+        maven 'maven3'
+        jdk 'jdk-17'
     }
 
     stages {
-
-        stage('Checkout SCM') {
+        stage('git checkout') {
             steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/master']],
-                    userRemoteConfigs: [[url: 'https://github.com/waghepratiksha21-create/Ekart.git']]
-                ])
+                git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('Build & Test') {
+        stage('compile') {
             steps {
-                withMaven(maven: 'Maven 3.9.3') {
-                    sh 'mvn clean verify'
+                sh "mvn compile"
+            }
+        }
+
+        stage('unit tests') {
+            steps {
+                sh "mvn test -DskipTests=true"
+            }
+        }
+
+        stage('SonarQube analysis') {
+            steps {
+                withSonarQubeEnv('sonar-scanner') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.java.binaries=target/classes"
                 }
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                dependencyCheck odcInstallation: 'ODC', stopBuild: true, additionalArguments: '--format HTML'
+                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+             }
+        }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+        
+
+        stage('build and Tag docker image') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
-                        def appImage = docker.build(DOCKER_IMAGE)
-                        appImage.push()
+                        sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
                     }
+            }
+        }
+
+        stage('Push image to Hub'){
+            steps{
+                script{
+                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                   sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'}
+                   sh 'docker push waghepratiksha21/ekart:latest'
+                }
+            }
+        }
+        stage('EKS and Kubectl configuration'){
+            steps{
+                script{
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+                }
+            }
+        }
+        stage('Deploy to k8s'){
+            steps{
+                script{
+                    sh 'kubectl apply -f deploymentservice.yml'
                 }
             }
         }
     }
 
-    post {
-        always {
-            echo 'Cleaning workspace...'
-            cleanWs() // No node block needed
-        }
-
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-
-        failure {
-            echo 'Pipeline failed!'
-        }
-    }
 }
-  
