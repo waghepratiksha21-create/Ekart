@@ -2,119 +2,105 @@ pipeline {
     agent any
 
     environment {
-        NVD_API_KEY = credentials('nvd-api-key')           // OWASP NVD API key
-        SONAR_TOKEN = credentials('sonarcloud-token')     // SonarCloud token stored in Jenkins
-        SONAR_ORG = "<your-org-key>"                      // Replace with your SonarCloud organization key
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
     tools {
-        maven 'maven3'   // Maven installation
-        jdk 'jdk8'       // Use Java 8 for Spring Boot 1.5
+        maven 'maven3'
+        jdk 'jdk-17'
     }
 
     stages {
-
-        stage('Git Checkout') {
+        stage('git checkout') {
             steps {
-                git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
+                git branch: 'master', url: 'https://github.com/ygminds73/Ekart.git'
             }
         }
 
-        stage('Compile') {
+        stage('compile') {
             steps {
-                sh "mvn clean compile"
+                sh "mvn compile"
             }
         }
 
-        stage('Unit Tests') {
+        stage('unit tests') {
             steps {
-                sh "mvn test -DskipTests"  // Remove -DskipTests if you want to run tests
+                sh "mvn test -DskipTests=true"
             }
         }
-
-        stage('SonarCloud Analysis') {
-            agent {
-                docker {
-                    image 'sonarsource/sonar-scanner-cli:latest'
-                    args '-v $WORKSPACE:/usr/src'
-                }
-            }
-            steps {
-                sh """
-                    sonar-scanner \
-                    -Dsonar.projectKey=EKART \
-                    -Dsonar.organization=${SONAR_ORG} \
-                    -Dsonar.login=${SONAR_TOKEN} \
-                    -Dsonar.projectName=EKART \
-                    -Dsonar.sources=/usr/src \
-                    -Dsonar.java.binaries=/usr/src/target/classes
-                """
-            }
+stage('SonarCloud analysis') {
+    steps {
+        withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
+            sh """
+                docker run --rm -v \$PWD:/usr/src -e SONAR_TOKEN=\$SONAR_TOKEN \
+                sonarsource/sonar-scanner-cli:latest \
+                sonar-scanner \
+                -Dsonar.projectKey=EKART \
+                -Dsonar.organization=mycompany-org \
+                -Dsonar.projectName=EKART \
+                -Dsonar.sources=/usr/src \
+                -Dsonar.java.binaries=/usr/src/target/classes
+            """
         }
+    }
+}
 
         stage('OWASP Dependency Check') {
             steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
                     dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
                                     odcInstallation: 'DC'
+             }
+        }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+
+        stage('deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
                 }
             }
         }
+        
 
-        stage('Build Package') {
+        stage('build and Tag docker image') {
             steps {
-                sh "mvn clean package -DskipTests"
+                script {
+                        sh "docker build -t youngminds73/ekart:latest -f docker/Dockerfile ."
+                    }
             }
         }
 
-        stage('Deploy to Nexus') {
-            steps {
-                withMaven(
-                    globalMavenSettingsConfig: 'global-maven',
-                    maven: 'maven3',
-                    jdk: 'jdk8'
-                ) {
-                    sh "mvn clean deploy -DskipTests"
+        stage('Push image to Hub'){
+            steps{
+                script{
+                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                   sh 'docker login -u youngminds73 -p ${dockerhubpwd}'}
+                   sh 'docker push youngminds73/ekart:latest'
                 }
             }
         }
-
-        stage('Build Docker Image') {
-            steps {
-                sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
-            }
-        }
-
-        stage('Push Docker Image to Hub') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh """
-                        docker login -u $DOCKER_USER -p $DOCKER_PASS
-                        docker push waghepratiksha21/ekart:latest
-                    """
+        stage('EKS and Kubectl configuration'){
+            steps{
+                script{
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
                 }
             }
         }
-
-        stage('EKS Configuration') {
-            steps {
-                sh "aws eks update-kubeconfig --region ap-south-1 --name project-cluster"
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh "kubectl apply -f deploymentservice.yml"
+        stage('Deploy to k8s'){
+            steps{
+                script{
+                    sh 'kubectl apply -f deploymentservice.yml'
+                }
             }
         }
     }
 
-    post {
-        success {
-            echo "Pipeline completed successfully!"
-        }
-        failure {
-            echo "Pipeline failed. Check logs for details."
-        }
-    }
 }
