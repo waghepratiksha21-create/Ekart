@@ -34,15 +34,16 @@ pipeline {
             }
         }
 
-      stage('Unit Tests') {
-    steps {
-        sh "${MAVEN_HOME}/bin/mvn test jacoco:report || true"
-    }
-}
+        stage('Unit Tests') {
+            steps {
+                // Run tests but do not fail pipeline if a test errors
+                sh "${MAVEN_HOME}/bin/mvn test jacoco:report || true"
+            }
+        }
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-server') { // Automatically uses sonar-token and URL
+                withSonarQubeEnv('sonar-server') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
@@ -110,7 +111,6 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        # Expose deployment as LoadBalancer if not exists
                         kubectl expose deployment ekart-deployment \
                             --type=LoadBalancer \
                             --name=ekart-service \
