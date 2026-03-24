@@ -2,15 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        MAVEN_HOME   = tool 'maven3'
-        JAVA_HOME    = tool 'jdk17'
-        NVD_API_KEY  = credentials('nvd-api-key')
-        SONAR_TOKEN  = credentials('sonar-token')
-        DOCKERHUB_USER = 'your-dockerhub-username'
-        IMAGE_NAME    = "shopping-cart"
-        IMAGE_TAG     = "${env.BUILD_NUMBER}"
-        KUBE_CONFIG   = credentials('eks-kubeconfig')
+        SCANNER_HOME = tool 'sonar-scanner'      // SonarQube Scanner tool
+        NVD_API_KEY   = credentials('nvd-api-key') // OWASP API key
+        DOCKERHUB_CRED = credentials('dockerhub-pwd') // DockerHub credentials
     }
 
     tools {
@@ -19,97 +13,101 @@ pipeline {
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Use ANSI color in console output
+        ansiColor('xterm')
         timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
+                checkout scm
             }
         }
 
-        stage('Compile & Package') {
+        stage('Compile') {
             steps {
-                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
-                    sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
-                }
+                sh "mvn clean compile -DskipTests=true"
             }
         }
 
         stage('Unit Tests') {
             steps {
-                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
-                    sh "${MAVEN_HOME}/bin/mvn test"
-                }
+                sh "mvn test"
             }
         }
 
         stage('SonarQube Analysis') {
+            environment {
+                SONAR_HOST_URL = 'http://13.233.125.170:9000'
+                SONAR_AUTH_TOKEN = credentials('sonar-token')
+            }
             steps {
-                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
-                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                        sh """
-                        ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=shopping-cart \
-                        -Dsonar.sources=src/main/java \
-                        -Dsonar.java.binaries=target/classes \
-                        -Dsonar.host.url=http://13.233.125.170:9000 \
-                        -Dsonar.login=${SONAR_TOKEN}
-                        """
-                    }
+                withSonarQubeEnv('sonar-server') {
+                    sh "${SCANNER_HOME}/bin/sonar-scanner"
                 }
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
-                    sh """
-                    dependency-check.sh --project shopping-cart \
-                    --scan ./ \
-                    --format HTML \
-                    --out dependency-check-report \
-                    --enableExperimental \
-                    --nvdApiKey ${NVD_API_KEY}
-                    """
-                }
+                sh """
+                dependency-check.sh \
+                --project 'shopping-cart' \
+                --scan ./ \
+                --enableExperimental \
+                --nvdApiKey ${NVD_API_KEY}
+                """
+            }
+        }
+
+        stage('Build Package') {
+            steps {
+                sh "mvn clean package -DskipTests=true"
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
-                    sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
-                }
+                sh "mvn deploy -DskipTests=true"
             }
         }
 
         stage('Build & Tag Docker Image') {
             steps {
                 script {
-                    sh "docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                    dockerImage = docker.build("myorg/shopping-cart:${env.BUILD_NUMBER}")
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
-                    sh "docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-pwd') {
+                        dockerImage.push()
+                    }
                 }
             }
         }
 
-        stage('Configure EKS & Deploy to Kubernetes') {
+        stage('Configure EKS') {
             steps {
-                script {
-                    sh "export KUBECONFIG=${KUBE_CONFIG}"
-                    sh "kubectl apply -f k8s/deployment.yaml"
-                    sh "kubectl apply -f k8s/service.yaml"
-                }
+                echo "Configure kubectl / AWS CLI for EKS cluster"
+                sh "aws eks update-kubeconfig --name my-cluster --region ap-south-1"
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh "kubectl apply -f k8s/deployment.yaml"
+            }
+        }
+
+        stage('Create LoadBalancer for Deployment') {
+            steps {
+                sh "kubectl apply -f k8s/service-lb.yaml"
             }
         }
     }
@@ -122,9 +120,7 @@ pipeline {
             echo "Pipeline FAILED. Check logs!"
         }
         always {
-            node { // cleanWs must be inside node context
-                cleanWs()
-            }
+            cleanWs()
         }
     }
 }
