@@ -8,8 +8,6 @@ pipeline {
         NVD_API_KEY = credentials('nvd-api-key')
         DOCKER_IMAGE = "waghepratiksha21/ekart"
         DOCKER_TAG = "latest"
-        SONAR_HOST = "http://13.233.125.170:9000"
-        SONAR_TOKEN = credentials('sonar-token')
     }
 
     tools {
@@ -44,8 +42,7 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                // Use the SonarQube installation configured in Jenkins
-                withSonarQubeEnv('sonar-server') {
+                withSonarQubeEnv('sonar-server') { // uses sonar-token and URL automatically
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
@@ -54,8 +51,6 @@ pipeline {
                         -Dsonar.tests=src/test/java \
                         -Dsonar.java.binaries=target/classes \
                         -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                        -Dsonar.host.url=${SONAR_HOST} \
-                        -Dsonar.token=${SONAR_TOKEN} \
                         -Dsonar.scm.provider=git
                     """
                 }
@@ -64,10 +59,8 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-                }
+                dependencyCheck additionalArguments: "--nvdApiKey=${NVD_API_KEY}",
+                                odcInstallation: 'DC'
             }
         }
 
@@ -93,8 +86,7 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([string(credentialsId: 'dockewrhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
-                    sh "docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}"
+                docker.withRegistry('', 'dockewrhub-pwd') {
                     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 }
             }
@@ -116,19 +108,18 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        # Expose deployment as LoadBalancer
                         kubectl expose deployment ekart-deployment \
                             --type=LoadBalancer \
                             --name=ekart-service \
                             --port=80 \
                             --target-port=8080 || echo "Service already exists"
 
-                        # Wait for LoadBalancer to get an external IP
                         echo "Waiting for LoadBalancer IP..."
                         for i in {1..30}; do
-                            LB_IP=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-                            if [ ! -z "$LB_IP" ]; then
-                                echo "LoadBalancer available at: $LB_IP"
+                            LB=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                            [ -z "$LB" ] && LB=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+                            if [ ! -z "$LB" ]; then
+                                echo "LoadBalancer available at: $LB"
                                 break
                             fi
                             sleep 10
