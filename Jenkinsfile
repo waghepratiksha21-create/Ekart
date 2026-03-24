@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
-        NVD_API_KEY = credentials('nvd-api-key')
+        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
+        NVD_API_KEY = credentials('nvd-api-key')         // NVD API key for Dependency-Check
     }
 
     tools {
@@ -28,12 +28,14 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
+                // Continue pipeline even if tests fail
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
+                    // Publish JUnit test results to Jenkins
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
@@ -54,20 +56,21 @@ pipeline {
         }
 
         stage('Dependency Check') {
-    steps {
-        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-            script {
-                def dcPath = tool 'DC'
-                sh """
-                    ${dcPath}/bin/dependency-check.sh \
-                    --project Ekart \
-                    --scan . \
-                    --nvdApiKey $NVD_API_KEY
-                """
+            steps {
+                // Catch fatal errors to prevent pipeline from failing
+                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                    script {
+                        def dcPath = tool 'DC'
+                        sh """
+                            ${dcPath}/bin/dependency-check.sh \
+                            --project Ekart \
+                            --scan . \
+                            --nvdApiKey $NVD_API_KEY
+                        """
+                    }
+                }
             }
         }
-    }
-}
 
         stage('Docker Build & Push') {
             steps {
