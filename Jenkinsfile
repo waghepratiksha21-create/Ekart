@@ -2,9 +2,8 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')        // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')   // DockerHub PAT
-        NVD_API_KEY = credentials('nvd-api-key')        // NVD API key (optional with --noupdate)
+        SONAR_TOKEN = credentials('sonar-token')
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
     }
 
     tools {
@@ -39,9 +38,13 @@ pipeline {
             }
         }
 
-        stage('Build Package') {
+        stage('Build Package & Copy Dependencies') {
             steps {
-                sh 'mvn package -DskipTests=true'
+                // Build package and copy dependencies to a folder for scanning
+                sh '''
+                    mvn package -DskipTests=true
+                    mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
+                '''
             }
         }
 
@@ -62,7 +65,8 @@ pipeline {
                             mkdir -p dependency-check-report
                             ${dcPath}/bin/dependency-check.sh \\
                                 --project Ekart \\
-                                --scan target/ \\
+                                --scan target/dependency-check-lib \\
+                                --scan target/*.jar \\
                                 --noupdate \\
                                 --format ALL \\
                                 --failOnCVSS 7 \\
