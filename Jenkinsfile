@@ -60,13 +60,15 @@ pipeline {
                     }
                 }
 
-                stage('OWASP Dependency Check') {
-                    steps {
-                        sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
-                    }
-                }
-
-            } // end parallel
+ stage('OWASP Dependency Check') {
+     steps {
+        withEnv(["NVD_API_KEY=${NVD_API_KEY}"]) {
+            sh """\
+                ${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY
+            """
+        }
+    }
+} // end parallel
         }
 
         stage('Package') {
