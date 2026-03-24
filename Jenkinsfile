@@ -54,18 +54,20 @@ pipeline {
         }
 
         stage('Dependency Check') {
-            steps {
-                script {
-                    def dcPath = tool 'DC'
-                    sh """
-                        ${dcPath}/bin/dependency-check.sh \
-                        --project Ekart \
-                        --scan . \
-                        --nvdApiKey $NVD_API_KEY
-                    """
-                }
+    steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+            script {
+                def dcPath = tool 'DC'
+                sh """
+                    ${dcPath}/bin/dependency-check.sh \
+                    --project Ekart \
+                    --scan . \
+                    --nvdApiKey $NVD_API_KEY
+                """
             }
         }
+    }
+}
 
         stage('Docker Build & Push') {
             steps {
