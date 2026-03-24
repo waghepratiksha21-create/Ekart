@@ -32,12 +32,13 @@ pipeline {
             }
         }
 
-        stage('Tests & Analysis') {
+        stage('Tests & Analysis (Parallel)') {
             parallel {
                 stage('Unit Tests') {
                     steps {
                         script {
                             try {
+                                echo "Running Unit Tests..."
                                 sh "${MAVEN_HOME}/bin/mvn test"
                             } catch (err) {
                                 echo "Unit tests failed! Marking build as UNSTABLE, continuing pipeline..."
@@ -49,22 +50,28 @@ pipeline {
 
                 stage('SonarQube Analysis') {
                     steps {
-                        withSonarQubeEnv('sonar-server') {
-                            sh """
-                                ${SCANNER_HOME}/bin/sonar-scanner \
-                                -Dsonar.projectKey=shopping-cart \
-                                -Dsonar.projectName="Shopping Cart" \
-                                -Dsonar.projectVersion=${BUILD_NUMBER} \
-                                -Dsonar.sources=src/main/java \
-                                -Dsonar.java.binaries=target/classes
-                            """
+                        script {
+                            echo "Starting SonarQube Analysis..."
+                            withSonarQubeEnv('sonar-server') {
+                                sh """
+                                    ${SCANNER_HOME}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=shopping-cart \
+                                    -Dsonar.projectName="Shopping Cart" \
+                                    -Dsonar.projectVersion=${BUILD_NUMBER} \
+                                    -Dsonar.sources=src/main/java \
+                                    -Dsonar.java.binaries=target/classes
+                                """
+                            }
                         }
                     }
                 }
 
                 stage('OWASP Dependency Check') {
                     steps {
-                        sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
+                        script {
+                            echo "Running OWASP Dependency Check..."
+                            sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
+                        }
                     }
                 }
             }
@@ -85,6 +92,7 @@ pipeline {
         stage('Build & Tag Docker Image') {
             steps {
                 script {
+                    echo "Building Docker image..."
                     sh "docker build -t myrepo/shopping-cart:${BUILD_NUMBER} ."
                 }
             }
@@ -93,6 +101,7 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
+                    echo "Pushing Docker image..."
                     docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
                         sh "docker push myrepo/shopping-cart:${BUILD_NUMBER}"
                     }
