@@ -2,108 +2,100 @@ pipeline {
     agent any
 
     environment {
-        MAVEN_HOME = tool 'maven3'
         SCANNER_HOME = tool 'sonar-scanner'
-        JDK_HOME = tool 'jdk17'
-        DOCKERHUB_USER = credentials('dockerhub-user')
-        DOCKERHUB_PWD = credentials('dockerhub-pwd')
-        NVD_API_KEY = credentials('nvd-api-key')
-        NEXUS_REPO = 'http://nexus.example.com/repository/maven-releases/'
-        SONAR_PROJECT_KEY = 'shopping-cart'
-        SONAR_PROJECT_NAME = 'shopping-cart'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
-    options {
-        timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+    tools {
+        maven 'maven3'
+        jdk 'jdk-17'
     }
 
     stages {
-        stage('Checkout') {
+        stage('git checkout') {
             steps {
-                checkout scm
+                git branch: 'master', url: 'https://github.com/ygminds73/Ekart.git'
             }
+        }
+
+        stage('compile') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+
+        stage('unit tests') {
+            steps {
+                sh "mvn test -DskipTests=true"
+            }
+        }
+
+        stage('SonarQube analysis') {
+            steps {
+                withSonarQubeEnv('sonar-scanner') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.java.binaries=target/classes"
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+             }
+        }
         }
 
         stage('Build') {
             steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
-                }
+                sh "mvn package -DskipTests=true"
             }
         }
 
-        stage('Parallel Tests & Analysis') {
-            parallel {
-                stage('Unit Tests') {
-                    steps {
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            sh "${MAVEN_HOME}/bin/mvn test"
-                        }
-                    }
-                }
-                stage('SonarQube') {
-                    steps {
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            sh """${SCANNER_HOME}/bin/sonar-scanner \
-                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                                -Dsonar.projectName=${SONAR_PROJECT_NAME} \
-                                -Dsonar.sources=src \
-                                -Dsonar.java.binaries=target/classes"""
-                        }
-                    }
-                }
-                stage('OWASP Dependency Check') {
-                    steps {
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            withEnv(["NVD_API_KEY=${NVD_API_KEY}"]) {
-                                sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Deploy to Nexus') {
+        stage('deploy to Nexus') {
             steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh "${MAVEN_HOME}/bin/mvn deploy -DaltDeploymentRepository=nexus::default::${NEXUS_REPO}"
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
                 }
             }
         }
+        
 
-        stage('Docker Build & Push') {
+        stage('build and Tag docker image') {
             steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh """
-                        docker build -t ${DOCKERHUB_USER}/shopping-cart:latest .
-                        docker tag ${DOCKERHUB_USER}/shopping-cart:latest ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
-                        echo "${DOCKERHUB_PWD}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
-                        docker push ${DOCKERHUB_USER}/shopping-cart:latest
-                        docker push ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
-                    """
-                }
+                script {
+                        sh "docker build -t youngminds73/ekart:latest -f docker/Dockerfile ."
+                    }
             }
         }
 
-        stage('Kubernetes Deploy') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh """
-                        kubectl apply -f k8s/deployment.yaml
-                        kubectl apply -f k8s/service.yaml
-                        kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb
-                    """
+        stage('Push image to Hub'){
+            steps{
+                script{
+                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                   sh 'docker login -u youngminds73 -p ${dockerhubpwd}'}
+                   sh 'docker push youngminds73/ekart:latest'
+                }
+            }
+        }
+        stage('EKS and Kubectl configuration'){
+            steps{
+                script{
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+                }
+            }
+        }
+        stage('Deploy to k8s'){
+            steps{
+                script{
+                    sh 'kubectl apply -f deploymentservice.yml'
                 }
             }
         }
     }
 
-    post {
-        always {
-            echo "Pipeline finished. Check stage results."
-            cleanWs()
-        }
-    }
 }
