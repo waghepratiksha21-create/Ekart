@@ -2,7 +2,10 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'    // SonarQube scanner
+        MAVEN_HOME   = tool 'maven3'           // Maven
+        JAVA_HOME    = tool 'jdk17'            // JDK
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-pwd')
         NVD_API_KEY = credentials('nvd-api-key')
     }
 
@@ -12,8 +15,8 @@ pipeline {
     }
 
     options {
-        skipStagesAfterUnstable()
         timestamps()
+        timeout(time: 60, unit: 'MINUTES')
     }
 
     stages {
@@ -26,20 +29,23 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'mvn clean install -DskipTests=true'
+                sh "${MAVEN_HOME}/bin/mvn clean compile"
             }
         }
 
         stage('Tests & Analysis') {
             parallel {
-
+                
                 stage('Unit Tests') {
                     steps {
                         script {
+                            // Run unit tests
                             try {
-                                sh 'mvn test'
-                            } catch (Exception e) {
-                                echo "Unit tests failed but pipeline will continue."
+                                sh "${MAVEN_HOME}/bin/mvn test"
+                            } catch (err) {
+                                echo "Unit tests failed, marking stage failed."
+                                currentBuild.result = 'FAILURE'
+                                throw err
                             }
                         }
                     }
@@ -48,30 +54,42 @@ pipeline {
                 stage('SonarQube Analysis') {
                     steps {
                         withSonarQubeEnv('sonar-server') {
-                            sh "${SCANNER_HOME}/bin/sonar-scanner"
+                            sh """
+                                ${SCANNER_HOME}/bin/sonar-scanner \
+                                -Dsonar.projectKey=shopping-cart \
+                                -Dsonar.projectName="Shopping Cart" \
+                                -Dsonar.projectVersion=${BUILD_NUMBER} \
+                                -Dsonar.sources=src/main/java \
+                                -Dsonar.java.binaries=target/classes
+                            """
                         }
                     }
                 }
 
                 stage('OWASP Dependency Check') {
                     steps {
-                        sh "mvn org.owasp:dependency-check-maven:check -Dnvd.apiKey=${NVD_API_KEY}"
+                        sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
                     }
                 }
+            }
+        }
 
+        stage('Build Package') {
+            steps {
+                sh "${MAVEN_HOME}/bin/mvn package -DskipTests"
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                sh '/var/lib/jenkins/tools/hudson.tasks.Maven_MavenInstallation/maven3/bin/mvn deploy -DskipTests=true'
+                sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
             }
         }
 
         stage('Build & Tag Docker Image') {
             steps {
                 script {
-                    sh 'docker build -t yourdockerhubuser/shopping-cart:${BUILD_NUMBER} .'
+                    sh "docker build -t myrepo/shopping-cart:${BUILD_NUMBER} ."
                 }
             }
         }
@@ -79,9 +97,8 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                        sh 'docker push yourdockerhubuser/shopping-cart:${BUILD_NUMBER}'
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-pwd') {
+                        sh "docker push myrepo/shopping-cart:${BUILD_NUMBER}"
                     }
                 }
             }
@@ -89,22 +106,24 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh 'kubectl apply -f k8s/deployment.yaml'
+                sh "kubectl apply -f k8s/deployment.yaml"
             }
         }
 
         stage('Create LoadBalancer for Deployment') {
             steps {
-                sh 'kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb'
+                sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
             }
         }
-
     }
 
     post {
         always {
-            echo 'Pipeline finished!'
+            echo "Pipeline finished!"
             cleanWs()
+        }
+        failure {
+            echo "Pipeline FAILED. Check logs!"
         }
     }
 }
