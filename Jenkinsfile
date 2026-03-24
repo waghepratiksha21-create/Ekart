@@ -1,14 +1,12 @@
 pipeline {
     agent any
 
-    // ------------------ Environment ------------------
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
         MAVEN_HOME   = tool 'maven3'
         JAVA_HOME    = tool 'jdk17'
         NVD_API_KEY  = credentials('nvd-api-key')
         SONAR_TOKEN  = credentials('sonar-token')
-        DOCKERHUB_PWD = credentials('dockerhub-pwd')
         DOCKERHUB_USER = 'your-dockerhub-username'
         IMAGE_NAME    = "shopping-cart"
         IMAGE_TAG     = "${env.BUILD_NUMBER}"
@@ -26,7 +24,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
@@ -99,8 +96,8 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                script {
-                    sh "echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin"
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
                     sh "docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
@@ -115,12 +112,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Post Actions') {
-            steps {
-                echo "Pipeline completed successfully!"
-            }
-        }
     }
 
     post {
@@ -131,7 +122,9 @@ pipeline {
             echo "Pipeline FAILED. Check logs!"
         }
         always {
-            cleanWs()
+            node { // cleanWs must be inside node context
+                cleanWs()
+            }
         }
     }
 }
