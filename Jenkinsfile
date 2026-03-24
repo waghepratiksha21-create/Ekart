@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
-        NVD_API_KEY = credentials('nvd-api-key')         // NVD API key for Dependency-Check
+        SONAR_TOKEN = credentials('sonar-token')
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
+        NVD_API_KEY = credentials('nvd-api-key')
     }
 
     tools {
@@ -28,14 +28,12 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Continue pipeline even if tests fail
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
-                    // Publish JUnit test results to Jenkins
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
@@ -78,6 +76,7 @@ pipeline {
                 }
             }
         }
+
     }
 
     post {
