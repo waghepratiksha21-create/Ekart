@@ -32,25 +32,25 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis (Docker)') {
-            steps {
-                script {
-                    // Wrap $PWD in quotes because workspace has spaces
-                    sh """
-                    docker run --rm -v "\$PWD":/usr/src \
-                        -e SONAR_TOKEN=$SONAR_TOKEN \
-                        sonarsource/sonar-scanner-cli:latest \
-                        sonar-scanner \
-                        -Dsonar.projectKey=EKART \
-                        -Dsonar.projectName=EKART \
-                        -Dsonar.sources=/usr/src \
-                        -Dsonar.java.binaries=/usr/src/target/classes \
-                        -Dsonar.host.url=$SONAR_HOST \
-                        -Dsonar.login=$SONAR_TOKEN
-                    """
-                }
-            }
+        stage('SonarQube analysis') {
+    steps {
+        withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+            sh '''
+            docker run --rm -v "$PWD":/usr/src \
+                -e SONAR_TOKEN=$SONAR_TOKEN \
+                sonarsource/sonar-scanner-cli:latest \
+                sonar-scanner \
+                -Dsonar.projectKey=EKART \
+                -Dsonar.projectName=EKART \
+                -Dsonar.sources=/usr/src/com/reljicd \
+                -Dsonar.java.binaries=/usr/src/target/classes \
+                -Dsonar.host.url=http://13.233.125.170:9000 \
+                -Dsonar.token=$SONAR_TOKEN \
+                -Dsonar.scm.provider=git
+            '''
         }
+    }
+
 
         stage('OWASP Dependency Check') {
             steps {
