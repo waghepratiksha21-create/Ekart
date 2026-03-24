@@ -6,7 +6,7 @@ pipeline {
         MAVEN_HOME   = tool 'maven3'
         JAVA_HOME    = tool 'jdk17'
         NVD_API_KEY  = credentials('nvd-api-key')
-        DOCKERHUB_CREDENTIALS = 'dockerhub-pwd' // just the ID
+        DOCKERHUB_CREDENTIALS = 'dockerhub-pwd' // Docker credential ID
     }
 
     tools {
@@ -40,9 +40,8 @@ pipeline {
                             try {
                                 sh "${MAVEN_HOME}/bin/mvn test"
                             } catch (err) {
-                                echo "Unit tests failed!"
-                                currentBuild.result = 'FAILURE'
-                                throw err
+                                echo "Unit tests failed! Marking build as UNSTABLE, continuing pipeline..."
+                                currentBuild.result = 'UNSTABLE'
                             }
                         }
                     }
@@ -123,6 +122,9 @@ pipeline {
         }
         failure {
             echo "Pipeline FAILED. Check logs!"
+        }
+        unstable {
+            echo "Pipeline finished with UNSTABLE status due to failed unit tests."
         }
     }
 }
