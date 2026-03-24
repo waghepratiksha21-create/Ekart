@@ -33,6 +33,7 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
+                        // This allows pipeline to continue even if tests fail
                         catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                             sh 'mvn test'
                         }
