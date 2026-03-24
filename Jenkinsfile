@@ -6,13 +6,13 @@ pipeline {
         SCANNER_HOME = tool 'sonar-scanner'
         MAVEN_HOME   = tool 'maven3'
         JAVA_HOME    = tool 'jdk17'
-        NVD_API_KEY  = credentials('nvd-api-key')          // Dependency-Check secret
-        SONAR_TOKEN  = credentials('sonar-token')         // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')     // DockerHub token
-        DOCKERHUB_USER = 'your-dockerhub-username'        // Replace with your DockerHub username
+        NVD_API_KEY  = credentials('nvd-api-key')
+        SONAR_TOKEN  = credentials('sonar-token')
+        DOCKERHUB_PWD = credentials('dockerhub-pwd')
+        DOCKERHUB_USER = 'your-dockerhub-username'
         IMAGE_NAME    = "shopping-cart"
         IMAGE_TAG     = "${env.BUILD_NUMBER}"
-        KUBE_CONFIG   = credentials('eks-kubeconfig')     // Optional: if using kubeconfig
+        KUBE_CONFIG   = credentials('eks-kubeconfig')
     }
 
     tools {
@@ -23,7 +23,6 @@ pipeline {
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timestamps()
-        ansiColor('xterm')
     }
 
     stages {
@@ -110,7 +109,6 @@ pipeline {
         stage('Configure EKS & Deploy to Kubernetes') {
             steps {
                 script {
-                    // Optional: if you have kubeconfig as credential
                     sh "export KUBECONFIG=${KUBE_CONFIG}"
                     sh "kubectl apply -f k8s/deployment.yaml"
                     sh "kubectl apply -f k8s/service.yaml"
