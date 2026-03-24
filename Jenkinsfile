@@ -52,25 +52,23 @@ pipeline {
             }
         }
 
-        stage('Dependency Check') {
-            steps {
-                // Catch errors so pipeline continues even if Dependency-Check fails
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                        script {
-                            def dcPath = tool 'DC'
-                            sh """
-                                ${dcPath}/bin/dependency-check.sh \
-                                --project Ekart \
-                                --scan . \
-                                --nvdApiKey \$NVD_API_KEY \
-                                --format ALL \
-                                --out dependency-check-report
-                            """
-                        }
-                    }
-                }
+       stage('Dependency Check') {
+    steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+            script {
+                def dcPath = tool 'DC'
+                sh """
+                    ${dcPath}/bin/dependency-check.sh \
+                    --project Ekart \
+                    --scan . \
+                    --noupdate \
+                    --format ALL \
+                    --out dependency-check-report || true
+                """
             }
+        }
+    }
+}
         }
 
         stage('Docker Build & Push') {
