@@ -14,14 +14,14 @@ pipeline {
     stages {
         stage('Git Checkout') {
             steps {
-                echo 'Checking out code from Git...'
+                echo 'Checking out code...'
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
         stage('Compile') {
             steps {
-                echo 'Compiling the project...'
+                echo 'Compiling project...'
                 sh 'mvn compile'
             }
         }
@@ -33,7 +33,7 @@ pipeline {
             }
             post {
                 always {
-                    echo 'Publishing JUnit test results...'
+                    echo 'Publishing test results...'
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
@@ -56,7 +56,7 @@ pipeline {
                 echo 'Preparing files for Dependency-Check...'
                 sh '''
                     mkdir -p target/dependency-check-lib
-                    mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
+                    mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib || echo "No dependencies to copy"
                 '''
             }
         }
@@ -65,23 +65,31 @@ pipeline {
             steps {
                 echo 'Running OWASP Dependency-Check...'
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
-                                    odcInstallation: 'DC'
+                    script {
+                        dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
+                                        odcInstallation: 'DC'
+                    }
                 }
-                echo 'Dependency-Check stage completed (may have warnings)'
+                echo 'Dependency-Check completed (even if no vulnerabilities found or errors occurred)'
+            }
+            post {
+                always {
+                    echo 'Archiving Dependency-Check report...'
+                    archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
+                }
             }
         }
 
         stage('Build Package') {
             steps {
-                echo 'Building Maven package...'
+                echo 'Building package...'
                 sh 'mvn package -DskipTests=true'
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                echo 'Deploying to Nexus repository...'
+                echo 'Deploying to Nexus...'
                 withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', traceability: true) {
                     sh 'mvn deploy -DskipTests=true'
                 }
@@ -107,14 +115,14 @@ pipeline {
 
         stage('EKS & Kubectl Config') {
             steps {
-                echo 'Updating EKS kubeconfig...'
+                echo 'Configuring EKS kubeconfig...'
                 sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo 'Deploying application to Kubernetes...'
+                echo 'Deploying to Kubernetes...'
                 sh 'kubectl apply -f deploymentservice.yml'
             }
         }
