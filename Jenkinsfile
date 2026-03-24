@@ -2,120 +2,119 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME   = tool 'sonar-scanner'
-        NVD_API_KEY    = credentials('nvd-api-key')
-        DOCKERHUB_CRED = credentials('dockerhub-pwd')
-    }
-
-    tools {
-        maven 'maven3'
-        jdk 'jdk17'
+        SCANNER_HOME = tool 'sonar-scanner'
+        MAVEN_HOME = tool 'maven3'
+        JAVA_HOME = tool 'jdk17'
+        PATH = "${JAVA_HOME}/bin:${MAVEN_HOME}/bin:${env.PATH}"
+        NVD_API_KEY = credentials('nvd-api-key')
     }
 
     options {
-        timestamps()
+        timeout(time: 60, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Checkout SCM') {
             steps {
-                checkout scm
+                git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('Compile') {
-            steps {
-                sh "mvn clean compile -DskipTests=true"
-            }
-        }
-
-        stage('Unit Tests') {
-            steps {
-                sh "mvn test"
-            }
-        }
-
-        stage('SonarQube Analysis') {
+        stage('Build & Parallel Tests') {
             steps {
                 script {
-                    withSonarQubeEnv('sonar-server') {
-                        sh "${SCANNER_HOME}/bin/sonar-scanner"
-                    }
+                    // Build first
+                    sh 'mvn clean install -DskipTests=true'
+
+                    // Run tests, Sonar, OWASP in parallel
+                    parallel (
+                        'Unit Tests': {
+                            sh 'mvn test'
+                        },
+                        'SonarQube Analysis': {
+                            withSonarQubeEnv('sonar-server') {
+                                sh "${SCANNER_HOME}/bin/sonar-scanner"
+                            }
+                        },
+                        'OWASP Dependency Check': {
+                            sh "mvn org.owasp:dependency-check-maven:check -Dnvd.apiKey=${NVD_API_KEY}"
+                        }
+                    )
                 }
-            }
-        }
-
-        stage('OWASP Dependency Check') {
-            steps {
-                sh """
-                dependency-check.sh \
-                --project 'shopping-cart' \
-                --scan ./ \
-                --enableExperimental \
-                --nvdApiKey ${NVD_API_KEY}
-                """
-            }
-        }
-
-        stage('Build Package') {
-            steps {
-                sh "mvn clean package -DskipTests=true"
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                sh "mvn deploy -DskipTests=true"
+                withCredentials([usernamePassword(credentialsId: 'nexus-cred', 
+                                                  usernameVariable: 'NEXUS_USER', 
+                                                  passwordVariable: 'NEXUS_PSW')]) {
+                    sh """
+                        mvn deploy -DskipTests=true \
+                        -Dnexus.username=$NEXUS_USER \
+                        -Dnexus.password=$NEXUS_PSW
+                    """
+                }
             }
         }
 
         stage('Build & Tag Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build("myorg/shopping-cart:${env.BUILD_NUMBER}")
+                    def imageTag = "shopping-cart:${env.BUILD_NUMBER}"
+                    sh "docker build -t ${imageTag} ."
+                    env.IMAGE_TAG = imageTag
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-pwd') {
-                        dockerImage.push()
-                    }
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', 
+                                                  usernameVariable: 'DOCKER_USER', 
+                                                  passwordVariable: 'DOCKER_PSW')]) {
+                    sh """
+                        echo $DOCKER_PSW | docker login -u $DOCKER_USER --password-stdin
+                        docker push ${env.IMAGE_TAG}
+                    """
                 }
-            }
-        }
-
-        stage('Configure EKS') {
-            steps {
-                sh "aws eks update-kubeconfig --name my-cluster --region ap-south-1"
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh "kubectl apply -f k8s/deployment.yaml"
+                script {
+                    sh """
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                    """
+                }
             }
         }
 
         stage('Create LoadBalancer for Deployment') {
             steps {
-                sh "kubectl apply -f k8s/service-lb.yaml"
+                script {
+                    sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
+                }
             }
         }
     }
 
     post {
+        always {
+            script {
+                echo "Pipeline finished!"
+            }
+            cleanWs()
+        }
         success {
-            echo "Pipeline SUCCESS!"
+            echo "Pipeline SUCCESS"
         }
         failure {
-            echo "Pipeline FAILED!"
-        }
-        always {
-            cleanWs()
+            echo "Pipeline FAILED. Check logs!"
         }
     }
 }
