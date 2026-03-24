@@ -3,18 +3,18 @@ pipeline {
 
     environment {
         MAVEN_HOME = tool 'maven3'
-        JDK_HOME = tool 'jdk8'            
+        JDK_HOME = tool 'jdk17'            
         SCANNER_HOME = tool 'sonar-scanner'
         NVD_API_KEY = credentials('nvd-api-key')
         DOCKER_IMAGE = "waghepratiksha21/ekart"
         DOCKER_TAG = "latest"
         SONAR_HOST = "http://13.233.125.170:9000"
-        SONAR_TOKEN = credentials('sonarqube-token')
+        SONAR_TOKEN = credentials('sonar-token')
     }
 
     tools {
         maven 'maven3'
-        jdk 'jdk8'
+        jdk 'jdk17'
     }
 
     options {
@@ -44,8 +44,8 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                // Make sure this matches the SonarQube installation in Jenkins
-                withSonarQubeEnv('SonarQubeServer') {
+                // Use the SonarQube installation configured in Jenkins
+                withSonarQubeEnv('sonar-server') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
@@ -79,7 +79,7 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk8', maven: 'maven3', traceability: true) {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk17', maven: 'maven3', traceability: true) {
                     sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
                 }
             }
@@ -93,7 +93,7 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
+                withCredentials([string(credentialsId: 'dockewrhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
                     sh "docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}"
                     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 }
