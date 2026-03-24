@@ -2,8 +2,7 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'            // SonarQube scanner installation
-        NVD_API_KEY = credentials('nvd-api-key')      // OWASP NVD API key
+        NVD_API_KEY = credentials('nvd-api-key')  // OWASP NVD API key
     }
 
     tools {
@@ -27,21 +26,26 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                sh "mvn test -DskipTests"  // If you want to skip, otherwise remove -DskipTests
+                sh "mvn test -DskipTests"  // Remove -DskipTests if you want real tests
             }
         }
 
+        // SonarQube stage updated to use Docker (avoids Java 17 issue)
         stage('SonarQube Analysis') {
+            agent {
+                docker {
+                    image 'sonarsource/sonar-scanner-cli:latest'
+                    args '-v $WORKSPACE:/usr/src'
+                }
+            }
             steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh """
-                    ${SCANNER_HOME}/bin/sonar-scanner \
+                sh """
+                    sonar-scanner \
                     -Dsonar.projectKey=EKART \
                     -Dsonar.projectName=EKART \
-                    -Dsonar.sources=. \
-                    -Dsonar.java.binaries=target/classes
-                    """
-                }
+                    -Dsonar.sources=/usr/src \
+                    -Dsonar.java.binaries=/usr/src/target/classes
+                """
             }
         }
 
@@ -83,7 +87,6 @@ pipeline {
         stage('Push Docker Image to Hub') {
             steps {
                 script {
-                    // Use username/password credentials stored in Jenkins
                     withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
                     }
