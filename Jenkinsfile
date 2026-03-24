@@ -33,7 +33,6 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
-                        // This allows pipeline to continue even if tests fail
                         catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                             sh 'mvn test'
                         }
@@ -84,7 +83,7 @@ pipeline {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh 'docker build -t youngminds73/ekart:latest -f docker/Dockerfile .'
                     withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKERHUB_PWD')]) {
-                        sh 'echo $DOCKERHUB_PWD | docker login -u youngminds73 --password-stdin'
+                        sh 'echo $DOCKERHUB_PWD | docker login -u $DOCKERHUB_USER --password-stdin'
                     }
                     sh 'docker push youngminds73/ekart:latest'
                 }
@@ -105,6 +104,12 @@ pipeline {
         always {
             cleanWs()
             echo "Pipeline finished"
+        }
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline completed with failures in some stages."
         }
     }
 }
