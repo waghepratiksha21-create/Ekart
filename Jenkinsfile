@@ -9,17 +9,14 @@ pipeline {
         DOCKERHUB_CREDENTIALS = 'dockerhub-pwd' // Docker credential ID
     }
 
-    tools {
-        maven 'maven3'
-        jdk 'jdk17'
-    }
-
     options {
         timestamps()
         timeout(time: 60, unit: 'MINUTES')
+        skipDefaultCheckout(false)
     }
 
     stages {
+
         stage('Checkout SCM') {
             steps {
                 checkout scm
@@ -32,16 +29,16 @@ pipeline {
             }
         }
 
-        stage('Tests & Analysis (Parallel)') {
+        stage('Parallel Tests & Analysis') {
             parallel {
+
                 stage('Unit Tests') {
                     steps {
                         script {
                             try {
-                                echo "Running Unit Tests..."
                                 sh "${MAVEN_HOME}/bin/mvn test"
                             } catch (err) {
-                                echo "Unit tests failed! Marking build as UNSTABLE, continuing pipeline..."
+                                echo "Unit tests failed, marking build as UNSTABLE."
                                 currentBuild.result = 'UNSTABLE'
                             }
                         }
@@ -50,34 +47,29 @@ pipeline {
 
                 stage('SonarQube Analysis') {
                     steps {
-                        script {
-                            echo "Starting SonarQube Analysis..."
-                            withSonarQubeEnv('sonar-server') {
-                                sh """
-                                    ${SCANNER_HOME}/bin/sonar-scanner \
-                                    -Dsonar.projectKey=shopping-cart \
-                                    -Dsonar.projectName="Shopping Cart" \
-                                    -Dsonar.projectVersion=${BUILD_NUMBER} \
-                                    -Dsonar.sources=src/main/java \
-                                    -Dsonar.java.binaries=target/classes
-                                """
-                            }
+                        withSonarQubeEnv('sonar-server') {
+                            sh """
+                                ${SCANNER_HOME}/bin/sonar-scanner \
+                                -Dsonar.projectKey=shopping-cart \
+                                -Dsonar.projectName="Shopping Cart" \
+                                -Dsonar.projectVersion=${BUILD_NUMBER} \
+                                -Dsonar.sources=src/main/java \
+                                -Dsonar.java.binaries=target/classes
+                            """
                         }
                     }
                 }
 
                 stage('OWASP Dependency Check') {
                     steps {
-                        script {
-                            echo "Running OWASP Dependency Check..."
-                            sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
-                        }
+                        sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
                     }
                 }
-            }
+
+            } // end parallel
         }
 
-        stage('Build Package') {
+        stage('Package') {
             steps {
                 sh "${MAVEN_HOME}/bin/mvn package -DskipTests"
             }
@@ -91,17 +83,13 @@ pipeline {
 
         stage('Build & Tag Docker Image') {
             steps {
-                script {
-                    echo "Building Docker image..."
-                    sh "docker build -t myrepo/shopping-cart:${BUILD_NUMBER} ."
-                }
+                sh "docker build -t myrepo/shopping-cart:${BUILD_NUMBER} ."
             }
         }
 
         stage('Push Docker Image') {
             steps {
                 script {
-                    echo "Pushing Docker image..."
                     docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
                         sh "docker push myrepo/shopping-cart:${BUILD_NUMBER}"
                     }
@@ -120,14 +108,13 @@ pipeline {
                 sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
             }
         }
-    }
+
+    } // end stages
 
     post {
         always {
-            node {
-                echo "Pipeline finished!"
-                cleanWs()
-            }
+            echo "Pipeline finished! Cleaning workspace..."
+            cleanWs()
         }
         failure {
             echo "Pipeline FAILED. Check logs!"
