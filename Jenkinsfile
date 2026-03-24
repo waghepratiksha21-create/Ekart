@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'      // SonarQube Scanner tool
-        NVD_API_KEY   = credentials('nvd-api-key') // OWASP API key
-        DOCKERHUB_CRED = credentials('dockerhub-pwd') // DockerHub credentials
+        SCANNER_HOME   = tool 'sonar-scanner'
+        NVD_API_KEY    = credentials('nvd-api-key')
+        DOCKERHUB_CRED = credentials('dockerhub-pwd')
     }
 
     tools {
@@ -18,6 +18,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 checkout scm
@@ -37,13 +38,11 @@ pipeline {
         }
 
         stage('SonarQube Analysis') {
-            environment {
-                SONAR_HOST_URL = 'http://13.233.125.170:9000'
-                SONAR_AUTH_TOKEN = credentials('sonar-token')
-            }
             steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh "${SCANNER_HOME}/bin/sonar-scanner"
+                script {
+                    withSonarQubeEnv('sonar-server') {
+                        sh "${SCANNER_HOME}/bin/sonar-scanner"
+                    }
                 }
             }
         }
@@ -92,7 +91,6 @@ pipeline {
 
         stage('Configure EKS') {
             steps {
-                echo "Configure kubectl / AWS CLI for EKS cluster"
                 sh "aws eks update-kubeconfig --name my-cluster --region ap-south-1"
             }
         }
@@ -112,10 +110,10 @@ pipeline {
 
     post {
         success {
-            echo "Build, Scan, Deploy pipeline SUCCESS!"
+            echo "Pipeline SUCCESS!"
         }
         failure {
-            echo "Pipeline FAILED. Check logs!"
+            echo "Pipeline FAILED!"
         }
         always {
             cleanWs()
