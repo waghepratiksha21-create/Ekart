@@ -13,8 +13,6 @@ pipeline {
     }
 
     options {
-        // Use ANSI color in console output
-        ansiColor('xterm')
         timestamps()
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
