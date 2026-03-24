@@ -1,9 +1,14 @@
 pipeline {
     agent any
 
+    environment {
+        SONAR_TOKEN = credentials('sonar-token')
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
+    }
+
     tools {
         maven 'maven3'
-        jdk 'jdk-17'
+        jdk 'jdk17'
     }
 
     stages {
@@ -21,9 +26,8 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Continue even if tests fail
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    sh 'mvn test || true'
+                    sh 'mvn test'
                 }
             }
         }
@@ -34,9 +38,25 @@ pipeline {
             }
         }
 
-        stage('Docker Build') {
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
+                }
+            }
+        }
+
+        stage('Dependency Check') {
+            steps {
+                sh '${tool "DC"}/bin/dependency-check.sh --project Ekart --scan .'
+            }
+        }
+
+        stage('Docker Build & Push') {
             steps {
                 sh 'docker build -t youngminds73/ekart:latest -f docker/Dockerfile .'
+                sh 'echo $DOCKERHUB_PWD | docker login -u youngminds73 --password-stdin'
+                sh 'docker push youngminds73/ekart:latest'
             }
         }
     }
