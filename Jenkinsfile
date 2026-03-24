@@ -45,35 +45,38 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
-                }
-            }
-        }
-
-        stage('Dependency Check') {
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    script {
-                        def dcPath = tool 'DC'
-                        sh """
-                            mkdir -p dependency-check-report
-                            ${dcPath}/bin/dependency-check.sh \
-                                --project Ekart \
-                                --scan . \
-                                --noupdate \
-                                --format ALL \
-                                --failOnCVSS 7 \
-                                --out dependency-check-report
-                        """
+        stage('Static Analysis & Security') {
+            parallel {
+                stage('SonarQube Analysis') {
+                    steps {
+                        withSonarQubeEnv('sonar-server') {
+                            sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
+                        }
                     }
                 }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
+                stage('Dependency Check') {
+                    steps {
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            script {
+                                def dcPath = tool 'DC'
+                                sh """
+                                    mkdir -p dependency-check-report
+                                    ${dcPath}/bin/dependency-check.sh \
+                                        --project Ekart \
+                                        --scan . \
+                                        --noupdate \
+                                        --format ALL \
+                                        --failOnCVSS 7 \
+                                        --out dependency-check-report
+                                """
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
+                        }
+                    }
                 }
             }
         }
