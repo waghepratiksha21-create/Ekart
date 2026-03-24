@@ -4,7 +4,6 @@ pipeline {
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
         NVD_API_KEY = credentials('nvd-api-key')
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-pwd')
     }
 
     tools {
@@ -13,13 +12,13 @@ pipeline {
     }
 
     options {
+        skipStagesAfterUnstable()
         timestamps()
-        timeout(time: 60, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
-        stage('Checkout Code') {
+
+        stage('Checkout SCM') {
             steps {
                 checkout scm
             }
@@ -27,20 +26,20 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'mvn clean compile -DskipTests=true'
+                sh 'mvn clean install -DskipTests=true'
             }
         }
 
         stage('Tests & Analysis') {
             parallel {
+
                 stage('Unit Tests') {
                     steps {
                         script {
-                            // Run tests but don't stop the pipeline on failure
                             try {
                                 sh 'mvn test'
                             } catch (Exception e) {
-                                echo "Unit tests failed, but pipeline continues."
+                                echo "Unit tests failed but pipeline will continue."
                             }
                         }
                     }
@@ -59,12 +58,7 @@ pipeline {
                         sh "mvn org.owasp:dependency-check-maven:check -Dnvd.apiKey=${NVD_API_KEY}"
                     }
                 }
-            }
-        }
 
-        stage('Build Package') {
-            steps {
-                sh 'mvn clean package -DskipTests=true'
             }
         }
 
@@ -77,8 +71,7 @@ pipeline {
         stage('Build & Tag Docker Image') {
             steps {
                 script {
-                    sh "docker build -t myapp:${env.BUILD_NUMBER} ."
-                    sh "docker tag myapp:${env.BUILD_NUMBER} mydockerhubuser/myapp:${env.BUILD_NUMBER}"
+                    sh 'docker build -t yourdockerhubuser/shopping-cart:${BUILD_NUMBER} .'
                 }
             }
         }
@@ -86,8 +79,9 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-pwd') {
-                        sh "docker push mydockerhubuser/myapp:${env.BUILD_NUMBER}"
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                        sh 'docker push yourdockerhubuser/shopping-cart:${BUILD_NUMBER}'
                     }
                 }
             }
@@ -95,27 +89,22 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh "kubectl apply -f k8s/deployment.yaml"
+                sh 'kubectl apply -f k8s/deployment.yaml'
             }
         }
 
         stage('Create LoadBalancer for Deployment') {
             steps {
-                sh "kubectl apply -f k8s/service.yaml"
+                sh 'kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb'
             }
         }
+
     }
 
     post {
         always {
-            echo "Pipeline finished!"
+            echo 'Pipeline finished!'
             cleanWs()
-        }
-        success {
-            echo "Pipeline completed successfully!"
-        }
-        failure {
-            echo "Pipeline FAILED. Check logs!"
         }
     }
 }
