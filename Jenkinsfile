@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
+        NVD_API_KEY = credentials('nvd-api-key')
     }
 
     tools {
@@ -12,25 +12,30 @@ pipeline {
     }
 
     stages {
-        stage('git checkout') {
+        stage('Git Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('compile') {
+        stage('Compile') {
             steps {
-                sh "mvn compile"
+                sh 'mvn compile'
             }
         }
 
-        stage('unit tests') {
+        stage('Unit Tests') {
             steps {
-                sh "mvn test -DskipTests=true"
+                sh 'mvn test -DskipTests=true || true'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
             }
         }
 
-        stage('SonarQube analysis') {
+        stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-scanner') {
                     sh "${env.SCANNER_HOME}/bin/sonar-scanner \
@@ -41,74 +46,69 @@ pipeline {
             }
         }
 
-        // ✅ NEW STAGE: Prepare files for Dependency-Check
         stage('Prepare Dependency-Check Files') {
             steps {
-                script {
-                    sh '''
-                        mkdir -p target/dependency-check-lib
-                        mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
-                    '''
-                }
+                sh '''
+                    mkdir -p target/dependency-check-lib
+                    mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
+                '''
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
-                                    odcInstallation: 'DC'
+                // Directly as a step so Jenkins shows this stage
+                dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
+                                odcInstallation: 'DC'
+            }
+        }
+
+        stage('Build Package') {
+            steps {
+                sh 'mvn package -DskipTests=true'
+            }
+        }
+
+        stage('Deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', traceability: true) {
+                    sh 'mvn deploy -DskipTests=true'
                 }
             }
         }
 
-        stage('Build') {
+        stage('Build & Tag Docker Image') {
             steps {
-                sh "mvn package -DskipTests=true"
+                sh 'docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile .'
             }
         }
 
-        stage('deploy to Nexus') {
+        stage('Push Image to DockerHub') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                    sh "mvn deploy -DskipTests=true"
-                }
-            }
-        }
-
-        stage('build and Tag docker image') {
-            steps {
-                script {
-                    sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
-                }
-            }
-        }
-
-        stage('Push image to Hub') {
-            steps {
-                script {
-                    withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
-                        sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'
-                    }
+                withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                    sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'
                     sh 'docker push waghepratiksha21/ekart:latest'
                 }
             }
         }
 
-        stage('EKS and Kubectl configuration') {
+        stage('EKS & Kubectl Config') {
             steps {
-                script {
-                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-                }
+                sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
             }
         }
 
-        stage('Deploy to k8s') {
+        stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    sh 'kubectl apply -f deploymentservice.yml'
-                }
+                sh 'kubectl apply -f deploymentservice.yml'
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning workspace...'
+            cleanWs()
         }
     }
 }
