@@ -42,7 +42,6 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                // Use only the Jenkins SonarQube configuration and token
                 withSonarQubeEnv('sonar-server') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
