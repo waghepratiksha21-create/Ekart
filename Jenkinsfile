@@ -44,7 +44,7 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                // **Update the name below to exactly match your Jenkins SonarQube installation**
+                // Make sure this matches the SonarQube installation in Jenkins
                 withSonarQubeEnv('SonarQubeServer') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
@@ -109,6 +109,32 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh 'kubectl apply -f deploymentservice.yml'
+            }
+        }
+
+        stage('Create LoadBalancer for Deployment') {
+            steps {
+                script {
+                    sh '''
+                        # Expose deployment as LoadBalancer
+                        kubectl expose deployment ekart-deployment \
+                            --type=LoadBalancer \
+                            --name=ekart-service \
+                            --port=80 \
+                            --target-port=8080 || echo "Service already exists"
+
+                        # Wait for LoadBalancer to get an external IP
+                        echo "Waiting for LoadBalancer IP..."
+                        for i in {1..30}; do
+                            LB_IP=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                            if [ ! -z "$LB_IP" ]; then
+                                echo "LoadBalancer available at: $LB_IP"
+                                break
+                            fi
+                            sleep 10
+                        done
+                    '''
+                }
             }
         }
     }
