@@ -44,17 +44,15 @@ pipeline {
      stage('SonarQube Analysis') {
     steps {
         withSonarQubeEnv('sonar-server') {
-            sh """
-                ${SCANNER_HOME}/bin/sonar-scanner \
-                -Dsonar.projectKey=EKART \
-                -Dsonar.projectName=EKART \
-                -Dsonar.sources=src/main/java \
-                -Dsonar.tests=src/test/java \
-                -Dsonar.java.binaries=target/classes \
-                -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                -Dsonar.scm.provider=git
-            """
-        }
+    sh "${SCANNER_HOME}/bin/sonar-scanner \
+        -Dsonar.projectKey=EKART \
+        -Dsonar.projectName=EKART \
+        -Dsonar.sources=src/main/java \
+        -Dsonar.tests=src/test/java \
+        -Dsonar.java.binaries=target/classes \
+        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+        -Dsonar.scm.provider=git"
+}
     }
 }
 
