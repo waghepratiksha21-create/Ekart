@@ -42,7 +42,7 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-server') { // uses sonar-token and URL automatically
+                withSonarQubeEnv('sonar-server') { // Automatically uses sonar-token and URL
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
@@ -86,8 +86,10 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                docker.withRegistry('', 'dockewrhub-pwd') {
-                    sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                script {
+                    docker.withRegistry('', 'dockewrhub-pwd') {
+                        sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    }
                 }
             }
         }
@@ -108,6 +110,7 @@ pipeline {
             steps {
                 script {
                     sh '''
+                        # Expose deployment as LoadBalancer if not exists
                         kubectl expose deployment ekart-deployment \
                             --type=LoadBalancer \
                             --name=ekart-service \
