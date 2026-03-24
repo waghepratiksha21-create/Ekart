@@ -51,24 +51,30 @@ pipeline {
                 }
             }
         }
-
-        stage('Dependency Check') {
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                        script {
-                            def dcPath = tool 'DC'
-                            sh """
-                                ${dcPath}/bin/dependency-check.sh \
-                                --project Ekart \
-                                --scan . \
-                                --nvdApiKey \$NVD_API_KEY \
-                                --format ALL \
-                                --failOnCVSS 7 \
-                                --out dependency-check-report
-                            """
-                        }
-                    }
+stage('Dependency Check') {
+    steps {
+        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+            script {
+                def dcPath = tool 'DC'
+                sh """
+                    mkdir -p dependency-check-report
+                    ${dcPath}/bin/dependency-check.sh \
+                        --project Ekart \
+                        --scan . \
+                        --noupdate \
+                        --format ALL \
+                        --failOnCVSS 7 \
+                        --out dependency-check-report
+                """
+            }
+        }
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
+        }
+    }
+}
                 }
             }
             post {
