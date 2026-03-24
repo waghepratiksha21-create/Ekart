@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
+        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
+        NVD_API_KEY = credentials('nvd-api-key')         // NVD API key for Dependency-Check
     }
 
     tools {
@@ -27,13 +28,14 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // This allows the pipeline to continue even if tests fail
+                // Continue pipeline even if tests fail
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
+                    // Publish JUnit test results to Jenkins
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
@@ -57,7 +59,12 @@ pipeline {
             steps {
                 script {
                     def dcPath = tool 'DC'
-                    sh "${dcPath}/bin/dependency-check.sh --project Ekart --scan ."
+                    sh """
+                        ${dcPath}/bin/dependency-check.sh \
+                        --project Ekart \
+                        --scan . \
+                        --nvdApiKey $NVD_API_KEY
+                    """
                 }
             }
         }
