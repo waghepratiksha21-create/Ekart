@@ -2,106 +2,113 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
+        NVD_API_KEY = credentials('nvd-api-key') // Jenkins secret text for OWASP
+        SONAR_TOKEN = credentials('sonar-token') // Jenkins secret text for self-hosted SonarQube
+        SONAR_HOST = "http://your-sonarqube-server:9000" // replace with your SonarQube server URL
     }
 
-  tools {
-    maven 'maven3'
-    jdk 'jdk8'   // Change from jdk-17 to jdk8
-}
+    tools {
+        maven 'maven3'
+        jdk 'jdk8'
+    }
 
     stages {
-        stage('git checkout') {
+
+        stage('Git Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('compile') {
+        stage('Compile') {
             steps {
-                sh "mvn compile"
+                sh "mvn clean compile"
             }
         }
 
-        stage('unit tests') {
+        stage('Unit Tests') {
             steps {
                 sh "mvn test -DskipTests=true"
             }
         }
-stage('SonarCloud analysis') {
-    steps {
-        withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
-             sh """
-    docker run --rm -v "\$PWD":/usr/src \
-        -e SONAR_TOKEN=\$SONAR_TOKEN \
-        sonarsource/sonar-scanner-cli:latest \
-        sonar-scanner \
-        -Dsonar.projectKey=EKART \
-        -Dsonar.organization=mycompany-org \
-        -Dsonar.projectName=EKART \
-        -Dsonar.sources=/usr/src \
-        -Dsonar.java.binaries=/usr/src/target/classes
-    """
-        }
-    }
-}
 
-        stage('OWASP Dependency Check') {
+        stage('SonarQube Analysis (Docker)') {
             steps {
-                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-             }
-        }
-        }
-
-        stage('Build') {
-            steps {
-                sh "mvn package -DskipTests=true"
+                script {
+                    // Wrap $PWD in quotes because workspace has spaces
+                    sh """
+                    docker run --rm -v "\$PWD":/usr/src \
+                        -e SONAR_TOKEN=$SONAR_TOKEN \
+                        sonarsource/sonar-scanner-cli:latest \
+                        sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.sources=/usr/src \
+                        -Dsonar.java.binaries=/usr/src/target/classes \
+                        -Dsonar.host.url=$SONAR_HOST \
+                        -Dsonar.login=$SONAR_TOKEN
+                    """
+                }
             }
         }
 
-        stage('deploy to Nexus') {
+        stage('OWASP Dependency Check') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
+                                    odcInstallation: 'DC'
+                }
+            }
+        }
+
+        stage('Build Package') {
+            steps {
+                sh "mvn clean package -DskipTests=true"
+            }
+        }
+
+        stage('Deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk8', maven: 'maven3') {
                     sh "mvn deploy -DskipTests=true"
                 }
             }
         }
-        
 
-        stage('build and Tag docker image') {
+        stage('Build & Tag Docker Image') {
             steps {
-                script {
-                        sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
-                    }
+                sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
             }
         }
 
-        stage('Push image to Hub'){
-            steps{
-                script{
-                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
-                   sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'}
-                   sh 'docker push waghepratiksha21/ekart:latest'
+        stage('Push Docker Image to Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
+                    sh "docker push waghepratiksha21/ekart:latest"
                 }
             }
         }
-        stage('EKS and Kubectl configuration'){
-            steps{
-                script{
-                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-                }
+
+        stage('EKS & Kubectl Configuration') {
+            steps {
+                sh "aws eks update-kubeconfig --region ap-south-1 --name project-cluster"
             }
         }
-        stage('Deploy to k8s'){
-            steps{
-                script{
-                    sh 'kubectl apply -f deploymentservice.yml'
-                }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh "kubectl apply -f deploymentservice.yml"
             }
         }
     }
 
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs for details."
+        }
+    }
 }
