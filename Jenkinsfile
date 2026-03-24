@@ -4,7 +4,7 @@ pipeline {
     environment {
         SONAR_TOKEN = credentials('sonar-token')        // SonarQube token
         DOCKERHUB_PWD = credentials('dockewrhub-pwd')   // DockerHub PAT
-        NVD_API_KEY = credentials('nvd-api-key')        // NVD API key (not required with --noupdate)
+        NVD_API_KEY = credentials('nvd-api-key')        // NVD API key (optional with --noupdate)
     }
 
     tools {
@@ -28,7 +28,7 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
@@ -45,38 +45,35 @@ pipeline {
             }
         }
 
-        stage('Static Analysis & Security') {
-            parallel {
-                stage('SonarQube Analysis') {
-                    steps {
-                        withSonarQubeEnv('sonar-server') {
-                            sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
-                        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
+                }
+            }
+        }
+
+        stage('Dependency Check') {
+            steps {
+                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                    script {
+                        def dcPath = tool 'DC'
+                        sh """
+                            mkdir -p dependency-check-report
+                            ${dcPath}/bin/dependency-check.sh \\
+                                --project Ekart \\
+                                --scan . \\
+                                --noupdate \\
+                                --format ALL \\
+                                --failOnCVSS 7 \\
+                                --out dependency-check-report
+                        """
                     }
                 }
-                stage('Dependency Check') {
-                    steps {
-                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            script {
-                                def dcPath = tool 'DC'
-                                sh """
-                                    mkdir -p dependency-check-report
-                                    ${dcPath}/bin/dependency-check.sh \
-                                        --project Ekart \
-                                        --scan . \
-                                        --noupdate \
-                                        --format ALL \
-                                        --failOnCVSS 7 \
-                                        --out dependency-check-report
-                                """
-                            }
-                        }
-                    }
-                    post {
-                        always {
-                            archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
-                        }
-                    }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
                 }
             }
         }
