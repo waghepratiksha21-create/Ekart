@@ -2,11 +2,11 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'    // SonarQube scanner
-        MAVEN_HOME   = tool 'maven3'           // Maven
-        JAVA_HOME    = tool 'jdk17'            // JDK
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-pwd')
-        NVD_API_KEY = credentials('nvd-api-key')
+        SCANNER_HOME = tool 'sonar-scanner'
+        MAVEN_HOME   = tool 'maven3'
+        JAVA_HOME    = tool 'jdk17'
+        NVD_API_KEY  = credentials('nvd-api-key')
+        DOCKERHUB_CREDENTIALS = 'dockerhub-pwd' // just the ID
     }
 
     tools {
@@ -20,7 +20,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
                 checkout scm
@@ -35,15 +34,13 @@ pipeline {
 
         stage('Tests & Analysis') {
             parallel {
-                
                 stage('Unit Tests') {
                     steps {
                         script {
-                            // Run unit tests
                             try {
                                 sh "${MAVEN_HOME}/bin/mvn test"
                             } catch (err) {
-                                echo "Unit tests failed, marking stage failed."
+                                echo "Unit tests failed!"
                                 currentBuild.result = 'FAILURE'
                                 throw err
                             }
@@ -97,7 +94,7 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-pwd') {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
                         sh "docker push myrepo/shopping-cart:${BUILD_NUMBER}"
                     }
                 }
@@ -110,7 +107,7 @@ pipeline {
             }
         }
 
-        stage('Create LoadBalancer for Deployment') {
+        stage('Create LoadBalancer') {
             steps {
                 sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
             }
@@ -119,8 +116,10 @@ pipeline {
 
     post {
         always {
-            echo "Pipeline finished!"
-            cleanWs()
+            node {
+                echo "Pipeline finished!"
+                cleanWs()
+            }
         }
         failure {
             echo "Pipeline FAILED. Check logs!"
