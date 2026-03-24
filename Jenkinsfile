@@ -3,20 +3,22 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        MAVEN_HOME   = tool 'maven3'
-        JAVA_HOME    = tool 'jdk17'
-        NVD_API_KEY  = credentials('nvd-api-key')
-        DOCKERHUB_CREDENTIALS = 'dockerhub-pwd' // Docker credential ID
+        MAVEN_HOME = tool 'maven3'
+        JDK_HOME = tool 'jdk17'
+        NVD_API_KEY = credentials('nvd-api-key')   // OWASP NVD API Key
+        DOCKERHUB_USER = credentials('dockerhub-user')
+        DOCKERHUB_PWD = credentials('dockerhub-pwd')
+        NEXUS_REPO = 'http://nexus.example.com/repository/maven-releases/'
+        SONAR_PROJECT_KEY = 'shopping-cart'
+        SONAR_PROJECT_NAME = 'shopping-cart'
     }
 
     options {
         timestamps()
-        timeout(time: 60, unit: 'MINUTES')
-        skipDefaultCheckout(false)
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
                 checkout scm
@@ -25,21 +27,25 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh "${MAVEN_HOME}/bin/mvn clean compile"
+                script {
+                    withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
+                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                            sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
+                        }
+                    }
+                }
             }
         }
 
         stage('Parallel Tests & Analysis') {
             parallel {
-
                 stage('Unit Tests') {
                     steps {
                         script {
-                            try {
-                                sh "${MAVEN_HOME}/bin/mvn test"
-                            } catch (err) {
-                                echo "Unit tests failed, marking build as UNSTABLE."
-                                currentBuild.result = 'UNSTABLE'
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') { 
+                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
+                                    sh "${MAVEN_HOME}/bin/mvn test"
+                                }
                             }
                         }
                     }
@@ -47,53 +53,75 @@ pipeline {
 
                 stage('SonarQube Analysis') {
                     steps {
-                        withSonarQubeEnv('sonar-server') {
-                            sh """
-                                ${SCANNER_HOME}/bin/sonar-scanner \
-                                -Dsonar.projectKey=shopping-cart \
-                                -Dsonar.projectName="Shopping Cart" \
-                                -Dsonar.projectVersion=${BUILD_NUMBER} \
-                                -Dsonar.sources=src/main/java \
-                                -Dsonar.java.binaries=target/classes
-                            """
+                        script {
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
+                                    sh """
+                                    ${SCANNER_HOME}/bin/sonar-scanner \
+                                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                        -Dsonar.projectName=${SONAR_PROJECT_NAME} \
+                                        -Dsonar.sources=src \
+                                        -Dsonar.java.binaries=target/classes
+                                    """
+                                }
+                            }
                         }
                     }
                 }
 
- stage('OWASP Dependency Check') {
-     steps {
-        withEnv(["NVD_API_KEY=${NVD_API_KEY}"]) {
-            sh """\
-                ${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY
-            """
-        }
-    }
-} // end parallel
-        }
-
-        stage('Package') {
-            steps {
-                sh "${MAVEN_HOME}/bin/mvn package -DskipTests"
+                stage('OWASP Dependency Check') {
+                    steps {
+                        script {
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin", "NVD_API_KEY=${NVD_API_KEY}"]) {
+                                    sh """
+                                    ${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY
+                                    """
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
+                            sh """
+                            ${MAVEN_HOME}/bin/mvn deploy \
+                                -DaltDeploymentRepository=nexus::default::${NEXUS_REPO}
+                            """
+                        }
+                    }
+                }
             }
         }
 
         stage('Build & Tag Docker Image') {
             steps {
-                sh "docker build -t myrepo/shopping-cart:${BUILD_NUMBER} ."
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh """
+                        docker build -t ${DOCKERHUB_USER}/shopping-cart:latest .
+                        docker tag ${DOCKERHUB_USER}/shopping-cart:latest ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
+                        """
+                    }
+                }
             }
         }
 
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKERHUB_CREDENTIALS) {
-                        sh "docker push myrepo/shopping-cart:${BUILD_NUMBER}"
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh """
+                        echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin
+                        docker push ${DOCKERHUB_USER}/shopping-cart:latest
+                        docker push ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
+                        """
                     }
                 }
             }
@@ -101,28 +129,34 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh "kubectl apply -f k8s/deployment.yaml"
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh """
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                        """
+                    }
+                }
             }
         }
 
         stage('Create LoadBalancer') {
             steps {
-                sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh """
+                        kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb
+                        """
+                    }
+                }
             }
         }
-
-    } // end stages
+    }
 
     post {
         always {
-            echo "Pipeline finished! Cleaning workspace..."
+            echo "Pipeline finished! Check stage results above."
             cleanWs()
-        }
-        failure {
-            echo "Pipeline FAILED. Check logs!"
-        }
-        unstable {
-            echo "Pipeline finished with UNSTABLE status due to failed unit tests."
         }
     }
 }
