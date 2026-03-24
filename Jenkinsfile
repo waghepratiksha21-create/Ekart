@@ -27,12 +27,8 @@ pipeline {
 
         stage('Build') {
             steps {
-                script {
-                    withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
-                        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                            sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
-                        }
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
                 }
             }
         }
@@ -41,43 +37,29 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') { 
-                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
-                                    sh "${MAVEN_HOME}/bin/mvn test"
-                                }
-                            }
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            sh "${MAVEN_HOME}/bin/mvn test"
                         }
                     }
                 }
-
                 stage('SonarQube Analysis') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
-                                    sh """
-                                    ${SCANNER_HOME}/bin/sonar-scanner \
-                                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                                        -Dsonar.projectName=${SONAR_PROJECT_NAME} \
-                                        -Dsonar.sources=src \
-                                        -Dsonar.java.binaries=target/classes
-                                    """
-                                }
-                            }
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            sh """
+                                ${SCANNER_HOME}/bin/sonar-scanner \
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                -Dsonar.projectName=${SONAR_PROJECT_NAME} \
+                                -Dsonar.sources=src \
+                                -Dsonar.java.binaries=target/classes
+                            """
                         }
                     }
                 }
-
                 stage('OWASP Dependency Check') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin", "NVD_API_KEY=${NVD_API_KEY}"]) {
-                                    sh """
-                                    ${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY
-                                    """
-                                }
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            withEnv(["NVD_API_KEY=${NVD_API_KEY}"]) {
+                                sh "${MAVEN_HOME}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=\$NVD_API_KEY"
                             }
                         }
                     }
@@ -87,67 +69,50 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        withEnv(["JAVA_HOME=${JDK_HOME}", "PATH+JAVA=${JDK_HOME}/bin"]) {
-                            sh """
-                            ${MAVEN_HOME}/bin/mvn deploy \
-                                -DaltDeploymentRepository=nexus::default::${NEXUS_REPO}
-                            """
-                        }
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh "${MAVEN_HOME}/bin/mvn deploy -DaltDeploymentRepository=nexus::default::${NEXUS_REPO}"
                 }
             }
         }
 
         stage('Build & Tag Docker Image') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh """
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh """
                         docker build -t ${DOCKERHUB_USER}/shopping-cart:latest .
                         docker tag ${DOCKERHUB_USER}/shopping-cart:latest ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
-                        """
-                    }
+                    """
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh """
-                        echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh """
+                        echo "${DOCKERHUB_PWD}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
                         docker push ${DOCKERHUB_USER}/shopping-cart:latest
                         docker push ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
-                        """
-                    }
+                    """
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh """
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh """
                         kubectl apply -f k8s/deployment.yaml
                         kubectl apply -f k8s/service.yaml
-                        """
-                    }
+                    """
                 }
             }
         }
 
         stage('Create LoadBalancer') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh """
-                        kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb
-                        """
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
                 }
             }
         }
