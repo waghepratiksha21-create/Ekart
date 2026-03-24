@@ -3,7 +3,9 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
+        NVD_API_KEY = credentials('nvd-api-key')
+        DOCKERHUB_USER = 'youngminds73'
+        DOCKERHUB_PWD = credentials('dockerhub-pwd')
     }
 
     tools {
@@ -11,91 +13,109 @@ pipeline {
         jdk 'jdk-17'
     }
 
+    options {
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
     stages {
-        stage('git checkout') {
+        stage('Checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/ygminds73/Ekart.git'
             }
         }
 
-        stage('compile') {
+        stage('Compile') {
             steps {
-                sh "mvn compile"
+                sh "${tool 'maven3'}/bin/mvn compile"
             }
         }
 
-        stage('unit tests') {
-            steps {
-                sh "mvn test -DskipTests=true"
-            }
-        }
+        stage('Parallel Tests & Analysis') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        script {
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                sh "${tool 'maven3'}/bin/mvn test"
+                            }
+                        }
+                    }
+                }
 
-        stage('SonarQube analysis') {
-            steps {
-                withSonarQubeEnv('sonar-scanner') {
-                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=EKART \
-                        -Dsonar.projectName=EKART \
-                        -Dsonar.java.binaries=target/classes"
+                stage('SonarQube Analysis') {
+                    steps {
+                        script {
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                withSonarQubeEnv('sonar-scanner') {
+                                    sh "${SCANNER_HOME}/bin/sonar-scanner " +
+                                       "-Dsonar.projectKey=EKART " +
+                                       "-Dsonar.projectName=EKART " +
+                                       "-Dsonar.java.binaries=target/classes"
+                                }
+                            }
+                        }
+                    }
+                }
+
+                stage('OWASP Dependency Check') {
+                    steps {
+                        script {
+                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                                sh "${tool 'maven3'}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        stage('OWASP Dependency Check') {
+        stage('Build Package') {
             steps {
-                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-             }
-        }
-        }
-
-        stage('Build') {
-            steps {
-                sh "mvn package -DskipTests=true"
+                sh "${tool 'maven3'}/bin/mvn package -DskipTests=true"
             }
         }
 
-        stage('deploy to Nexus') {
-            steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
-                    sh "mvn deploy -DskipTests=true"
-                }
-            }
-        }
-        
-
-        stage('build and Tag docker image') {
+        stage('Deploy to Nexus') {
             steps {
                 script {
-                        sh "docker build -t youngminds73/ekart:latest -f docker/Dockerfile ."
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh "${tool 'maven3'}/bin/mvn deploy -DskipTests=true"
                     }
+                }
             }
         }
 
-        stage('Push image to Hub'){
-            steps{
-                script{
-                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
-                   sh 'docker login -u youngminds73 -p ${dockerhubpwd}'}
-                   sh 'docker push youngminds73/ekart:latest'
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh "docker build -t ${DOCKERHUB_USER}/ekart:latest -f docker/Dockerfile ."
+                        sh "echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin"
+                        sh "docker push ${DOCKERHUB_USER}/ekart:latest"
+                    }
                 }
             }
         }
-        stage('EKS and Kubectl configuration'){
-            steps{
-                script{
-                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-                }
-            }
-        }
-        stage('Deploy to k8s'){
-            steps{
-                script{
-                    sh 'kubectl apply -f deploymentservice.yml'
+
+        stage('EKS & Kubernetes Deploy') {
+            steps {
+                script {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+                        sh 'kubectl apply -f deploymentservice.yml'
+                    }
                 }
             }
         }
     }
 
+    post {
+        always {
+            script {
+                echo "Pipeline finished. Cleaning workspace."
+                cleanWs()
+            }
+        }
+    }
 }
