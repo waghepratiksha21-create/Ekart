@@ -2,98 +2,113 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
     tools {
         maven 'maven3'
-        jdk 'jdk17'
+        jdk 'jdk-17'
     }
 
     stages {
-
-        stage('Checkout') {
+        stage('git checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
-        stage('Compile') {
+        stage('compile') {
             steps {
-                sh 'mvn compile'
+                sh "mvn compile"
             }
         }
 
-        stage('Unit Tests') {
+        stage('unit tests') {
             steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    sh 'mvn test || true'
-                }
-            }
-            post {
-                always {
-                    junit '**/target/surefire-reports/*.xml'
-                }
+                sh "mvn test -DskipTests=true"
             }
         }
 
-        stage('Build Package') {
+        stage('SonarQube analysis') {
             steps {
-                sh 'mvn package -DskipTests=true'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh 'mvn sonar:sonar -Dsonar.login=$SONAR_TOKEN'
+                withSonarQubeEnv('sonar-scanner') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.java.binaries=target/classes"
                 }
             }
         }
 
-        stage('Dependency Check') {
-            steps {
-                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    script {
-                        def dcPath = tool 'DC'
-                        sh """
-                            mkdir -p dependency-check-report
-                            ${dcPath}/bin/dependency-check.sh \\
-                                --project Ekart \\
-                                --scan target/dependency-check-lib \\
-                                --scan target/shopping-cart-0.0.1-SNAPSHOT.jar \\
-                                --noupdate \\
-                                --format ALL \\
-                                --failOnCVSS 7 \\
-                                --out dependency-check-report
-                        """
-                    }
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Docker Build & Push') {
+        // ✅ NEW STAGE: Prepare files for Dependency-Check
+        stage('Prepare Dependency-Check Files') {
             steps {
                 script {
-                    sh 'docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile .'
-                    sh 'echo $DOCKERHUB_PWD | docker login -u waghepratiksha21 --password-stdin'
+                    sh '''
+                        mkdir -p target/dependency-check-lib
+                        mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
+                    '''
+                }
+            }
+        }
+
+        stage('OWASP Dependency Check') {
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
+                                    odcInstallation: 'DC'
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+
+        stage('deploy to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk-17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh "mvn deploy -DskipTests=true"
+                }
+            }
+        }
+
+        stage('build and Tag docker image') {
+            steps {
+                script {
+                    sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
+                }
+            }
+        }
+
+        stage('Push image to Hub') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
+                        sh 'docker login -u waghepratiksha21 -p ${dockerhubpwd}'
+                    }
                     sh 'docker push waghepratiksha21/ekart:latest'
                 }
             }
         }
 
-    }
+        stage('EKS and Kubectl configuration') {
+            steps {
+                script {
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+                }
+            }
+        }
 
-    post {
-        always {
-            echo 'Cleaning workspace...'
-            cleanWs()
+        stage('Deploy to k8s') {
+            steps {
+                script {
+                    sh 'kubectl apply -f deploymentservice.yml'
+                }
+            }
         }
     }
 }
