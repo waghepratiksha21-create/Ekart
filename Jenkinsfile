@@ -1,12 +1,18 @@
 pipeline {
     agent any
 
+    // ------------------ Environment ------------------
     environment {
-        MAVEN_HOME = tool 'maven3'
-        JDK_HOME = tool 'jdk17'
         SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = "waghepratiksha21/ekart"
-        DOCKER_TAG = "latest"
+        MAVEN_HOME   = tool 'maven3'
+        JAVA_HOME    = tool 'jdk17'
+        NVD_API_KEY  = credentials('nvd-api-key')          // Dependency-Check secret
+        SONAR_TOKEN  = credentials('sonar-token')         // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')     // DockerHub token
+        DOCKERHUB_USER = 'your-dockerhub-username'        // Replace with your DockerHub username
+        IMAGE_NAME    = "shopping-cart"
+        IMAGE_TAG     = "${env.BUILD_NUMBER}"
+        KUBE_CONFIG   = credentials('eks-kubeconfig')     // Optional: if using kubeconfig
     }
 
     tools {
@@ -15,8 +21,9 @@ pipeline {
     }
 
     options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
         timestamps()
-        skipDefaultCheckout(true)
+        ansiColor('xterm')
     }
 
     stages {
@@ -27,56 +34,57 @@ pipeline {
             }
         }
 
-        stage('Compile') {
+        stage('Compile & Package') {
             steps {
-                sh "${MAVEN_HOME}/bin/mvn clean compile"
+                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
+                    sh "${MAVEN_HOME}/bin/mvn clean package -DskipTests=true"
+                }
             }
         }
 
         stage('Unit Tests') {
             steps {
-                // Run tests but continue even if they fail
-                sh "${MAVEN_HOME}/bin/mvn test jacoco:report || true"
+                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
+                    sh "${MAVEN_HOME}/bin/mvn test"
+                }
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                // Use Jenkins SonarQube configuration
-                withSonarQubeEnv('sonar-server') {
-                    sh """
+                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                        sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=EKART \
-                        -Dsonar.projectName=EKART \
+                        -Dsonar.projectKey=shopping-cart \
                         -Dsonar.sources=src/main/java \
-                        -Dsonar.tests=src/test/java \
                         -Dsonar.java.binaries=target/classes \
-                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-                        -Dsonar.scm.provider=git
-                    """
+                        -Dsonar.host.url=http://13.233.125.170:9000 \
+                        -Dsonar.login=${SONAR_TOKEN}
+                        """
+                    }
                 }
             }
         }
 
         stage('OWASP Dependency Check') {
             steps {
-                // Inject NVD API key safely
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey=${NVD_API_KEY}",
-                                    odcInstallation: 'DC'
+                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
+                    sh """
+                    dependency-check.sh --project shopping-cart \
+                    --scan ./ \
+                    --format HTML \
+                    --out dependency-check-report \
+                    --enableExperimental \
+                    --nvdApiKey ${NVD_API_KEY}
+                    """
                 }
-            }
-        }
-
-        stage('Build Package') {
-            steps {
-                sh "${MAVEN_HOME}/bin/mvn package -DskipTests=true"
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', maven: 'maven3', jdk: 'jdk17') {
+                withEnv(["JAVA_HOME=${env.JAVA_HOME}", "PATH+JAVA=${env.JAVA_HOME}/bin"]) {
                     sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
                 }
             }
@@ -84,69 +92,48 @@ pipeline {
 
         stage('Build & Tag Docker Image') {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -f docker/Dockerfile ."
+                script {
+                    sh "docker build -t ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                withCredentials([string(credentialsId: 'dockewrhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
-                    sh '''
-                        set -x
-                        docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}
-                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
-                    '''
+                script {
+                    sh "echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin"
+                    sh "docker push ${DOCKERHUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
                 }
             }
         }
 
-        stage('Configure EKS') {
-            steps {
-                sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-            }
-        }
-
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh 'kubectl apply -f deploymentservice.yml'
-            }
-        }
-
-        stage('Create LoadBalancer for Deployment') {
+        stage('Configure EKS & Deploy to Kubernetes') {
             steps {
                 script {
-                    sh '''
-                        kubectl expose deployment ekart-deployment \
-                            --type=LoadBalancer \
-                            --name=ekart-service \
-                            --port=80 \
-                            --target-port=8080 || echo "Service already exists"
-
-                        echo "Waiting for LoadBalancer IP..."
-                        for i in {1..30}; do
-                            LB_IP=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-                            if [ ! -z "$LB_IP" ]; then
-                                echo "LoadBalancer available at: $LB_IP"
-                                break
-                            fi
-                            sleep 10
-                        done
-                    '''
+                    // Optional: if you have kubeconfig as credential
+                    sh "export KUBECONFIG=${KUBE_CONFIG}"
+                    sh "kubectl apply -f k8s/deployment.yaml"
+                    sh "kubectl apply -f k8s/service.yaml"
                 }
+            }
+        }
+
+        stage('Post Actions') {
+            steps {
+                echo "Pipeline completed successfully!"
             }
         }
     }
 
     post {
-        always {
-            echo 'Cleaning workspace...'
-            cleanWs()
-        }
         success {
-            echo 'Pipeline completed successfully!'
+            echo "Build, Scan, Deploy pipeline SUCCESS!"
         }
         failure {
-            echo 'Pipeline failed. Check logs above for details.'
+            echo "Pipeline FAILED. Check logs!"
+        }
+        always {
+            cleanWs()
         }
     }
 }
