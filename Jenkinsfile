@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         MAVEN_HOME = tool 'maven3'
-        JDK_HOME = tool 'jdk8'            // Use existing JDK in Jenkins
+        JDK_HOME = tool 'jdk8'            
         SCANNER_HOME = tool 'sonar-scanner'
         NVD_API_KEY = credentials('nvd-api-key')
         DOCKER_IMAGE = "waghepratiksha21/ekart"
@@ -23,6 +23,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
@@ -43,7 +44,8 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-scanner') {
+                // **Update the name below to exactly match your Jenkins SonarQube installation**
+                withSonarQubeEnv('SonarQubeServer') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=EKART \
