@@ -3,9 +3,7 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')
         DOCKERHUB_USER = 'youngminds73'
-        DOCKERHUB_PWD = credentials('dockerhub-pwd')
     }
 
     tools {
@@ -27,7 +25,7 @@ pipeline {
 
         stage('Compile') {
             steps {
-                sh "${tool 'maven3'}/bin/mvn compile"
+                sh 'mvn compile'
             }
         }
 
@@ -35,24 +33,20 @@ pipeline {
             parallel {
                 stage('Unit Tests') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                sh "${tool 'maven3'}/bin/mvn test"
-                            }
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            sh 'mvn test'
                         }
                     }
                 }
 
                 stage('SonarQube Analysis') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                withSonarQubeEnv('sonar-scanner') {
-                                    sh "${SCANNER_HOME}/bin/sonar-scanner " +
-                                       "-Dsonar.projectKey=EKART " +
-                                       "-Dsonar.projectName=EKART " +
-                                       "-Dsonar.java.binaries=target/classes"
-                                }
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            withSonarQubeEnv('sonar-scanner') {
+                                sh """${SCANNER_HOME}/bin/sonar-scanner \
+                                    -Dsonar.projectKey=EKART \
+                                    -Dsonar.projectName=EKART \
+                                    -Dsonar.java.binaries=target/classes"""
                             }
                         }
                     }
@@ -60,9 +54,9 @@ pipeline {
 
                 stage('OWASP Dependency Check') {
                     steps {
-                        script {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                                sh "${tool 'maven3'}/bin/mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=${NVD_API_KEY}"
+                        catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                            withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                                sh 'mvn org.owasp:dependency-check-maven:check -Dnvd.api.key=$NVD_API_KEY'
                             }
                         }
                     }
@@ -72,39 +66,35 @@ pipeline {
 
         stage('Build Package') {
             steps {
-                sh "${tool 'maven3'}/bin/mvn package -DskipTests=true"
+                sh 'mvn package -DskipTests=true'
             }
         }
 
         stage('Deploy to Nexus') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "${tool 'maven3'}/bin/mvn deploy -DskipTests=true"
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh 'mvn deploy -DskipTests=true'
                 }
             }
         }
 
         stage('Docker Build & Push') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh "docker build -t ${DOCKERHUB_USER}/ekart:latest -f docker/Dockerfile ."
-                        sh "echo ${DOCKERHUB_PWD} | docker login -u ${DOCKERHUB_USER} --password-stdin"
-                        sh "docker push ${DOCKERHUB_USER}/ekart:latest"
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh 'docker build -t youngminds73/ekart:latest -f docker/Dockerfile .'
+                    withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'DOCKERHUB_PWD')]) {
+                        sh 'echo $DOCKERHUB_PWD | docker login -u youngminds73 --password-stdin'
                     }
+                    sh 'docker push youngminds73/ekart:latest'
                 }
             }
         }
 
         stage('EKS & Kubernetes Deploy') {
             steps {
-                script {
-                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                        sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
-                        sh 'kubectl apply -f deploymentservice.yml'
-                    }
+                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+                    sh 'kubectl apply -f deploymentservice.yml'
                 }
             }
         }
@@ -112,10 +102,8 @@ pipeline {
 
     post {
         always {
-            script {
-                echo "Pipeline finished. Cleaning workspace."
-                cleanWs()
-            }
+            cleanWs()
+            echo "Pipeline finished"
         }
     }
 }
