@@ -35,13 +35,14 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Run tests but don't fail the pipeline if tests fail
+                // Run tests but continue even if they fail
                 sh "${MAVEN_HOME}/bin/mvn test jacoco:report || true"
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
+                // Use Jenkins SonarQube configuration
                 withSonarQubeEnv('sonar-server') {
                     sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
@@ -59,8 +60,11 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                dependencyCheck additionalArguments: "--nvdApiKey=${NVD_API_KEY}",
-                                odcInstallation: 'DC'
+                // Inject NVD API key safely
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey=${NVD_API_KEY}",
+                                    odcInstallation: 'DC'
+                }
             }
         }
 
@@ -87,8 +91,11 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 withCredentials([string(credentialsId: 'dockewrhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
-                    sh "docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}"
-                    sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    sh '''
+                        set -x
+                        docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    '''
                 }
             }
         }
@@ -139,7 +146,7 @@ pipeline {
             echo 'Pipeline completed successfully!'
         }
         failure {
-            echo 'Pipeline failed. Check the logs above for errors.'
+            echo 'Pipeline failed. Check logs above for details.'
         }
     }
 }
