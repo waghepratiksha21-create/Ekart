@@ -6,10 +6,10 @@ pipeline {
         NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
     }
 
-    tools {
-        maven 'maven3'
-        jdk 'jdk-17'
-    }
+  tools {
+    maven 'maven3'
+    jdk 'jdk8'   // Change from jdk-17 to jdk8
+}
 
     stages {
         stage('git checkout') {
