@@ -2,9 +2,8 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
-        NVD_API_KEY = credentials('nvd-api-key')         // NVD API key for Dependency-Check
+        SONAR_TOKEN = credentials('sonar-token')       // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')  // DockerHub PAT
     }
 
     tools {
@@ -28,14 +27,12 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Continue pipeline even if tests fail
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
-                    // Publish JUnit test results to Jenkins
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
@@ -57,16 +54,20 @@ pipeline {
 
         stage('Dependency Check') {
             steps {
-                // Catch fatal errors to prevent pipeline from failing
+                // Catch errors so pipeline continues even if Dependency-Check fails
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                    script {
-                        def dcPath = tool 'DC'
-                        sh """
-                            ${dcPath}/bin/dependency-check.sh \
-                            --project Ekart \
-                            --scan . \
-                            --nvdApiKey $NVD_API_KEY
-                        """
+                    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                        script {
+                            def dcPath = tool 'DC'
+                            sh """
+                                ${dcPath}/bin/dependency-check.sh \
+                                --project Ekart \
+                                --scan . \
+                                --nvdApiKey \$NVD_API_KEY \
+                                --format ALL \
+                                --out dependency-check-report
+                            """
+                        }
                     }
                 }
             }
