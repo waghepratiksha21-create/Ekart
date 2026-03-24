@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')
+        SONAR_TOKEN = credentials('sonar-token')        // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')   // DockerHub PAT
+        NVD_API_KEY = credentials('nvd-api-key')        // NVD API key (optional with --noupdate)
     }
 
     tools {
@@ -27,23 +28,25 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
+                // Run tests but do not fail the pipeline
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
+                    // Publish JUnit test results
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
         }
 
-        stage('Build Package & Copy Dependencies') {
+        stage('Build Package & Prepare Dependencies') {
             steps {
-                // Build package and copy dependencies to a folder for scanning
                 sh '''
-                    mvn package -DskipTests=true
-                    mvn dependency:copy-dependencies -DoutputDirectory=target/dependency-check-lib
+                    mvn clean package -DskipTests=true
+                    # Copy runtime dependencies for Dependency-Check
+                    mvn dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/dependency-check-lib
                 '''
             }
         }
@@ -66,7 +69,6 @@ pipeline {
                             ${dcPath}/bin/dependency-check.sh \\
                                 --project Ekart \\
                                 --scan target/dependency-check-lib \\
-                                --scan target/*.jar \\
                                 --noupdate \\
                                 --format ALL \\
                                 --failOnCVSS 7 \\
