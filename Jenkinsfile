@@ -59,17 +59,17 @@ pipeline {
             }
         }
 
-        stage('deploy to Nexus') {
-            steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven',
-                          jdk: 'jdk17',
-                          maven: 'maven3',
-                          mavenSettingsConfig: '',
-                          traceability: true) {
-                    sh "mvn deploy -DskipTests=true"
-                }
-            }
+       stage('deploy to Nexus') {
+    steps {
+        withMaven(
+            globalMavenSettingsConfig: 'global-maven',
+            maven: 'maven3',
+            jdk: 'jdk17'
+        ) {
+            sh "mvn clean deploy -DskipTests"
         }
+    }
+}
 
         stage('build and Tag docker image') {
             steps {
