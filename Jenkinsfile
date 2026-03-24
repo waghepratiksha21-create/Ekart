@@ -3,9 +3,8 @@ pipeline {
 
     environment {
         MAVEN_HOME = tool 'maven3'
-        JDK_HOME = tool 'jdk17'            
+        JDK_HOME = tool 'jdk17'
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')
         DOCKER_IMAGE = "waghepratiksha21/ekart"
         DOCKER_TAG = "latest"
     }
@@ -36,25 +35,28 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Run tests but do not fail pipeline if a test errors
+                // Run tests but don't fail the pipeline if tests fail
                 sh "${MAVEN_HOME}/bin/mvn test jacoco:report || true"
             }
         }
 
-     stage('SonarQube Analysis') {
-    steps {
-        withSonarQubeEnv('sonar-server') {
-    sh "${SCANNER_HOME}/bin/sonar-scanner \
-        -Dsonar.projectKey=EKART \
-        -Dsonar.projectName=EKART \
-        -Dsonar.sources=src/main/java \
-        -Dsonar.tests=src/test/java \
-        -Dsonar.java.binaries=target/classes \
-        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
-        -Dsonar.scm.provider=git"
-}
-    }
-}
+        stage('SonarQube Analysis') {
+            steps {
+                // Use only the Jenkins SonarQube configuration and token
+                withSonarQubeEnv('sonar-server') {
+                    sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=EKART \
+                        -Dsonar.projectName=EKART \
+                        -Dsonar.sources=src/main/java \
+                        -Dsonar.tests=src/test/java \
+                        -Dsonar.java.binaries=target/classes \
+                        -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                        -Dsonar.scm.provider=git
+                    """
+                }
+            }
+        }
 
         stage('OWASP Dependency Check') {
             steps {
@@ -71,7 +73,7 @@ pipeline {
 
         stage('Deploy to Nexus') {
             steps {
-                withMaven(globalMavenSettingsConfig: 'global-maven', jdk: 'jdk17', maven: 'maven3', traceability: true) {
+                withMaven(globalMavenSettingsConfig: 'global-maven', maven: 'maven3', jdk: 'jdk17') {
                     sh "${MAVEN_HOME}/bin/mvn deploy -DskipTests=true"
                 }
             }
@@ -85,10 +87,9 @@ pipeline {
 
         stage('Push Docker Image') {
             steps {
-                script {
-                    docker.withRegistry('', 'dockewrhub-pwd') {
-                        sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    }
+                withCredentials([string(credentialsId: 'dockewrhub-pwd', variable: 'DOCKER_HUB_PWD')]) {
+                    sh "docker login -u waghepratiksha21 -p ${DOCKER_HUB_PWD}"
+                    sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 }
             }
         }
@@ -117,10 +118,9 @@ pipeline {
 
                         echo "Waiting for LoadBalancer IP..."
                         for i in {1..30}; do
-                            LB=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-                            [ -z "$LB" ] && LB=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-                            if [ ! -z "$LB" ]; then
-                                echo "LoadBalancer available at: $LB"
+                            LB_IP=$(kubectl get svc ekart-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                            if [ ! -z "$LB_IP" ]; then
+                                echo "LoadBalancer available at: $LB_IP"
                                 break
                             fi
                             sleep 10
@@ -128,6 +128,19 @@ pipeline {
                     '''
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning workspace...'
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check the logs above for errors.'
         }
     }
 }
