@@ -37,11 +37,8 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar-scanner') {
-                    sh "${env.SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=EKART \
-                        -Dsonar.projectName=EKART \
-                        -Dsonar.java.binaries=target/classes"
+                withSonarQubeEnv('sonar-server') {
+                    sh "${env.SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=EKART -Dsonar.projectName=EKART -Dsonar.java.binaries=target/classes"
                 }
             }
         }
@@ -57,9 +54,13 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                // Directly as a step so Jenkins shows this stage
-                dependencyCheck additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib",
-                                odcInstallation: 'DC'
+                // Must be declarative step, not inside script { }
+                dependencyCheck odcInstallation: 'DC', additionalArguments: "--noupdate --format ALL --failOnCVSS 7 --scan target/dependency-check-lib"
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'dependency-check-report/**', allowEmptyArchive: true
+                }
             }
         }
 
