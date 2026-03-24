@@ -31,17 +31,18 @@ pipeline {
         }
 
         stage('SonarQube analysis') {
-            steps {
-                withSonarQubeEnv('sonar-scanner') {
-                    sh """
-                    ${env.SCANNER_HOME}/bin/sonar-scanner \
-                    -Dsonar.projectKey=EKART \
-                    -Dsonar.projectName=EKART \
-                    -Dsonar.java.binaries=target/classes
-                    """
-                }
-            }
+    steps {
+        withSonarQubeEnv('sonar-server') {
+            sh """
+            ${SCANNER_HOME}/bin/sonar-scanner \
+            -Dsonar.projectKey=EKART \
+            -Dsonar.projectName=EKART \
+            -Dsonar.sources=. \
+            -Dsonar.java.binaries=target/classes
+            """
         }
+    }
+}
 
         stage('OWASP Dependency Check') {
             steps {
