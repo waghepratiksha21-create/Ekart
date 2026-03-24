@@ -16,7 +16,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git branch: 'master', url: 'https://github.com/ygminds73/Ekart.git'
+                git branch: 'master', url: 'https://github.com/waghepratiksha21-create/Ekart.git'
             }
         }
 
@@ -75,9 +75,9 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 script {
-                    sh 'docker build -t youngminds73/ekart:latest -f docker/Dockerfile .'
-                    sh 'echo $DOCKERHUB_PWD | docker login -u youngminds73 --password-stdin'
-                    sh 'docker push youngminds73/ekart:latest'
+                    sh 'docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile .'
+                    sh 'echo $DOCKERHUB_PWD | docker login -u waghepratiksha21 --password-stdin'
+                    sh 'docker push waghepratiksha21/ekart:latest'
                 }
             }
         }
