@@ -2,7 +2,9 @@ pipeline {
     agent any
 
     environment {
-        NVD_API_KEY = credentials('nvd-api-key')  // OWASP NVD API key
+        NVD_API_KEY = credentials('nvd-api-key')           // OWASP NVD API key
+        SONAR_TOKEN = credentials('sonarcloud-token')     // SonarCloud token stored in Jenkins
+        SONAR_ORG = "<your-org-key>"                      // Replace with your SonarCloud organization key
     }
 
     tools {
@@ -26,12 +28,11 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                sh "mvn test -DskipTests"  // Remove -DskipTests if you want real tests
+                sh "mvn test -DskipTests"  // Remove -DskipTests if you want to run tests
             }
         }
 
-        // SonarQube stage updated to use Docker (avoids Java 17 issue)
-        stage('SonarQube Analysis') {
+        stage('SonarCloud Analysis') {
             agent {
                 docker {
                     image 'sonarsource/sonar-scanner-cli:latest'
@@ -42,6 +43,8 @@ pipeline {
                 sh """
                     sonar-scanner \
                     -Dsonar.projectKey=EKART \
+                    -Dsonar.organization=${SONAR_ORG} \
+                    -Dsonar.login=${SONAR_TOKEN} \
                     -Dsonar.projectName=EKART \
                     -Dsonar.sources=/usr/src \
                     -Dsonar.java.binaries=/usr/src/target/classes
@@ -78,36 +81,30 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
-                }
+                sh "docker build -t waghepratiksha21/ekart:latest -f docker/Dockerfile ."
             }
         }
 
         stage('Push Docker Image to Hub') {
             steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
-                    }
-                    sh "docker push waghepratiksha21/ekart:latest"
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-pwd', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh """
+                        docker login -u $DOCKER_USER -p $DOCKER_PASS
+                        docker push waghepratiksha21/ekart:latest
+                    """
                 }
             }
         }
 
         stage('EKS Configuration') {
             steps {
-                script {
-                    sh "aws eks update-kubeconfig --region ap-south-1 --name project-cluster"
-                }
+                sh "aws eks update-kubeconfig --region ap-south-1 --name project-cluster"
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    sh "kubectl apply -f deploymentservice.yml"
-                }
+                sh "kubectl apply -f deploymentservice.yml"
             }
         }
     }
