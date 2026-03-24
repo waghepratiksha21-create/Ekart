@@ -2,9 +2,8 @@ pipeline {
     agent any
 
     environment {
-        SONAR_TOKEN = credentials('sonar-token')        // SonarQube token
-        DOCKERHUB_PWD = credentials('dockewrhub-pwd')   // DockerHub PAT
-        NVD_API_KEY = credentials('nvd-api-key')        // NVD API key (optional with --noupdate)
+        SONAR_TOKEN = credentials('sonar-token')         // SonarQube token
+        DOCKERHUB_PWD = credentials('dockewrhub-pwd')    // DockerHub PAT
     }
 
     tools {
@@ -28,26 +27,20 @@ pipeline {
 
         stage('Unit Tests') {
             steps {
-                // Run tests but do not fail the pipeline
                 catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
                     sh 'mvn test || true'
                 }
             }
             post {
                 always {
-                    // Publish JUnit test results
                     junit '**/target/surefire-reports/*.xml'
                 }
             }
         }
 
-        stage('Build Package & Prepare Dependencies') {
+        stage('Build Package') {
             steps {
-                sh '''
-                    mvn clean package -DskipTests=true
-                    # Copy runtime dependencies for Dependency-Check
-                    mvn dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/dependency-check-lib
-                '''
+                sh 'mvn package -DskipTests=true'
             }
         }
 
@@ -69,6 +62,7 @@ pipeline {
                             ${dcPath}/bin/dependency-check.sh \\
                                 --project Ekart \\
                                 --scan target/dependency-check-lib \\
+                                --scan target/shopping-cart-0.0.1-SNAPSHOT.jar \\
                                 --noupdate \\
                                 --format ALL \\
                                 --failOnCVSS 7 \\
