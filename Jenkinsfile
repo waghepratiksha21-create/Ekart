@@ -32,17 +32,17 @@ pipeline {
 stage('SonarCloud analysis') {
     steps {
         withCredentials([string(credentialsId: 'sonarcloud-token', variable: 'SONAR_TOKEN')]) {
-            sh """
-                docker run --rm -v \$PWD:/usr/src 
-                -e SONAR_TOKEN=\$SONAR_TOKEN \
-                sonarsource/sonar-scanner-cli:latest \
-                sonar-scanner \
-                -Dsonar.projectKey=EKART \
-                -Dsonar.organization=mycompany-org \
-                -Dsonar.projectName=EKART \
-                -Dsonar.sources=/usr/src \
-                -Dsonar.java.binaries=/usr/src/target/classes
-            """
+             sh """
+    docker run --rm -v "\$PWD":/usr/src \
+        -e SONAR_TOKEN=\$SONAR_TOKEN \
+        sonarsource/sonar-scanner-cli:latest \
+        sonar-scanner \
+        -Dsonar.projectKey=EKART \
+        -Dsonar.organization=mycompany-org \
+        -Dsonar.projectName=EKART \
+        -Dsonar.sources=/usr/src \
+        -Dsonar.java.binaries=/usr/src/target/classes
+    """
         }
     }
 }
