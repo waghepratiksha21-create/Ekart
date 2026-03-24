@@ -2,12 +2,12 @@ pipeline {
     agent any
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
         MAVEN_HOME = tool 'maven3'
+        SCANNER_HOME = tool 'sonar-scanner'
         JDK_HOME = tool 'jdk17'
-        NVD_API_KEY = credentials('nvd-api-key')   // OWASP NVD API Key
         DOCKERHUB_USER = credentials('dockerhub-user')
         DOCKERHUB_PWD = credentials('dockerhub-pwd')
+        NVD_API_KEY = credentials('nvd-api-key')
         NEXUS_REPO = 'http://nexus.example.com/repository/maven-releases/'
         SONAR_PROJECT_KEY = 'shopping-cart'
         SONAR_PROJECT_NAME = 'shopping-cart'
@@ -19,7 +19,7 @@ pipeline {
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
                 checkout scm
             }
@@ -42,16 +42,14 @@ pipeline {
                         }
                     }
                 }
-                stage('SonarQube Analysis') {
+                stage('SonarQube') {
                     steps {
                         catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
-                            sh """
-                                ${SCANNER_HOME}/bin/sonar-scanner \
+                            sh """${SCANNER_HOME}/bin/sonar-scanner \
                                 -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                                 -Dsonar.projectName=${SONAR_PROJECT_NAME} \
                                 -Dsonar.sources=src \
-                                -Dsonar.java.binaries=target/classes
-                            """
+                                -Dsonar.java.binaries=target/classes"""
                         }
                     }
                 }
@@ -75,21 +73,12 @@ pipeline {
             }
         }
 
-        stage('Build & Tag Docker Image') {
+        stage('Docker Build & Push') {
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh """
                         docker build -t ${DOCKERHUB_USER}/shopping-cart:latest .
                         docker tag ${DOCKERHUB_USER}/shopping-cart:latest ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
-                    """
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh """
                         echo "${DOCKERHUB_PWD}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
                         docker push ${DOCKERHUB_USER}/shopping-cart:latest
                         docker push ${DOCKERHUB_USER}/shopping-cart:\$(git rev-parse --short HEAD)
@@ -98,21 +87,14 @@ pipeline {
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Kubernetes Deploy') {
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh """
                         kubectl apply -f k8s/deployment.yaml
                         kubectl apply -f k8s/service.yaml
+                        kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb
                     """
-                }
-            }
-        }
-
-        stage('Create LoadBalancer') {
-            steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh "kubectl expose deployment shopping-cart --type=LoadBalancer --name=shopping-cart-lb"
                 }
             }
         }
@@ -120,7 +102,7 @@ pipeline {
 
     post {
         always {
-            echo "Pipeline finished! Check stage results above."
+            echo "Pipeline finished. Check stage results."
             cleanWs()
         }
     }
